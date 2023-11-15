@@ -208,6 +208,10 @@ BOOL load_pe(
                         DPRINT("Replacing %s!%s with ntdll!RtlExitUserThread", name, ibn->Name);
                         ft->u1.Function = (ULONG_PTR)xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
                     }
+                    else if (!_stricmp(ibn->Name, "GetProcAddress"))
+                    {
+                        ft->u1.Function = (ULONG_PTR)my_get_proc_address;
+                    }
                     else
                     {
                         ft->u1.Function = (ULONG_PTR)xGetProcAddress(dll, ibn->Name, 0);
@@ -443,7 +447,7 @@ BOOL IsExitAPI(
     CHAR  api[128] = { 0 };
     INT   i        = 0;
 
-    str = "ExitProcess;exit;_exit;_cexit;_c_exit;quick_exit;_Exit;_o_exit\0";
+    str = "ExitProcess;exit;_exit;_cexit;_c_exit;quick_exit;_Exit;_o_exit;CorExitProcess\0";
 
     for (;;)
     {

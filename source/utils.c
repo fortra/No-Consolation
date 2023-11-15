@@ -79,6 +79,35 @@ VOID store_loaded_dll(
     peinfo->libs_loaded = lib_loaded;
 }
 
+/*
+ * Some PEs will search for APIs at runtime
+ * we need to spoof these as well if we want to prevent
+ * our process from exiting.
+ * PsExec searches for mscoree!CorExitProcess and calls it if found.
+ * This only happens if the CLR is loaded (i.e. PowerShell has been run)
+ */
+FARPROC my_get_proc_address(
+    IN HMODULE hModule,
+    IN LPSTR lpProcName)
+{
+    if (IsExitAPI(lpProcName))
+    {
+        DPRINT("Replacing %p!%s with ntdll!RtlExitUserThread", hModule, lpProcName);
+        return xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
+    }
+
+    FARPROC ( WINAPI *GetProcAddress ) ( HMODULE, LPSTR ) = xGetProcAddress(xGetLibAddress("kernel32", TRUE, NULL), "GetProcAddress", 0);
+    if ( GetProcAddress )
+    {
+        return GetProcAddress(hModule, lpProcName);
+    }
+    else
+    {
+        api_not_found("GetProcAddress");
+        return NULL;
+    }
+}
+
 HANDLE get_console_handle(VOID)
 {
     uPRTL_USER_PROCESS_PARAMETERS ProcessParameters = (uPRTL_USER_PROCESS_PARAMETERS)NtCurrentTeb()->ProcessEnvironmentBlock->ProcessParameters;

@@ -11,6 +11,10 @@ VOID store_loaded_dll(
     IN HMODULE dll,
     IN PCHAR name);
 
+FARPROC my_get_proc_address(
+    IN HMODULE hModule,
+    IN LPSTR lpProcName);
+
 HANDLE get_console_handle(VOID);
 
 VOID set_console_handle(

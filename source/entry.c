@@ -33,6 +33,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     BeaconDataParse(&parser, Buffer, Length);
     pe_bytes      = BeaconDataExtract(&parser, &pe_length);
     pe_path       = BeaconDataExtract(&parser, NULL);
+    pe_path       = pe_path[0] ? pe_path : NULL;
     local         = BeaconDataInt(&parser);
     timeout       = BeaconDataInt(&parser);
     headers       = BeaconDataInt(&parser);
@@ -56,6 +57,9 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->nooutput      = nooutput;
     peinfo->alloc_console = alloc_console;
     peinfo->unload_libs   = unload_libs;
+
+    if (!pe_path && !pe_length)
+        goto Cleanup;
 
     if (local)
     {
@@ -105,6 +109,7 @@ Cleanup:
 
     if (close_handles)
     {
+        DPRINT("Freeing handles");
         if (peinfo && peinfo->Handles && peinfo->Handles->fo_msvc)
         {
             void ( WINAPI *msvcrt_close ) ( int ) = xGetProcAddress(xGetLibAddress("msvcrt", TRUE, NULL), "_close", 0);

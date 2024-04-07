@@ -528,6 +528,11 @@ BOOL remove_saved_pe(
             {
                 if (saved_pe->next)
                 {
+                    if (!BeaconRemoveValue(NC_PE_INFO_KEY))
+                    {
+                        function_failed("BeaconRemoveValue");
+                        return FALSE;
+                    }
                     if (!BeaconAddValue(NC_PE_INFO_KEY, saved_pe->next))
                     {
                         function_failed("BeaconAddValue");

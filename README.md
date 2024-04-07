@@ -8,6 +8,7 @@ This is a Beacon Object File (BOF) that executes unmanaged PEs inline and retrie
 - Supports 64 and 32 bits
 - Supports EXEs and DLLs
 - Does not create new processes
+- Saves binaries in memory
 
 ## Usage
 ```
@@ -23,13 +24,32 @@ Usage: noconsolation [--local] [--timeout 60] [-k] [--method funcname] [-w] [--n
     --alloc-console, -ac                  Optional. Allocate a console. This will spawn a new process
     --close-handles, -ch                  Optional. Close Pipe handles once finished. If PowerShell was already ran, this will break the output for PowerShell in the future
     --free-libraries, -fl                 Optional. Free all loaded DLLs
-    /path/to/binary.exe                   Required. Full path to the windows EXE/DLL you wish you run inside Beacon
+    --dont-save, -ds                      Optional. Do not save this binary in memory
+    --list-pes, -lpe                      Optional. List all PEs that have been loaded in memory
+    --unload-pe PE_NAME, -upe PE_NAME     Optional. Unload from memory a PE
+    /path/to/binary.exe                   Required. Full path to the windows EXE/DLL you wish you run inside Beacon. If already loaded, you can simply specify the binary name.
     ARG1 ARG2                             Optional. Parameters for the PE. Must be provided after the path
 
     Example: noconsolation --local C:\windows\system32\windowspowershell\v1.0\powershell.exe $ExecutionContext.SessionState.LanguageMode
     Example: noconsolation /tmp/mimikatz.exe privilege::debug token::elevate exit
     Example: noconsolation --local C:\windows\system32\cmd.exe /c ipconfig
+    Example: noconsolation LoadedBinary.exe args
 ```
+
+## Loading binaries into memory
+Binaries are automatically encrypted and stored in memory after they are ran the first time. This means that you do not need to constantly send the binary over the wire.  
+To execute a binary that has already been saved in memory, simply specify its name instead of its entire path. So, instead of running:
+```
+noconsolation --local C:\windows\system32\cmd.exe /c ipconfig
+```
+You would run:
+```
+noconsolation cmd.exe /c ipconfig
+```
+
+To list all binaries loaded in memory, run `--list-pes`.  
+If you are done with some binary and wish to unload it, run `--unload-pe mimikatz.exe`.  
+Finally, if you want to run a binary without it being automatically loaded in memory, run it with `--dont-save`.  
 
 ## Credits
 - [Octoberfest7](https://twitter.com/octoberfest73) for [Inline-Execute-PE](https://github.com/Octoberfest7/Inline-Execute-PE) which was my inspiration for this project

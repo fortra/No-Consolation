@@ -9,12 +9,13 @@ This is a Beacon Object File (BOF) that executes unmanaged PEs inline and retrie
 - Supports EXEs and DLLs
 - Does not create new processes
 - Saves binaries in memory
+- Supports C++ exceptions (experimental)
 
 ## Usage
 ```
 Summary: Run an unmanaged EXE/DLL inside Beacon's memory.
 
-Usage: noconsolation [--local] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] /path/to/binary.exe arg1 arg2
+Usage: noconsolation [--local] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] /path/to/binary.exe arg1 arg2
     --local, -l                           Optional. The binary should be loaded from the target Windows machine
     --timeout NUM_SECONDS, -t NUM_SECONDS Optional. The number of seconds you wish to wait for the PE to complete running. Default 60 seconds. Set to 0 to disable
     -k                                    Optional. Overwrite the PE headers
@@ -33,6 +34,7 @@ Usage: noconsolation [--local] [--timeout 60] [-k] [--method funcname] [-w] [--n
     Example: noconsolation --local C:\windows\system32\windowspowershell\v1.0\powershell.exe $ExecutionContext.SessionState.LanguageMode
     Example: noconsolation /tmp/mimikatz.exe privilege::debug token::elevate exit
     Example: noconsolation --local C:\windows\system32\cmd.exe /c ipconfig
+    Example: noconsolation --list-pes
     Example: noconsolation LoadedBinary.exe args
 ```
 

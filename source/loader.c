@@ -20,6 +20,9 @@ BOOL load_pe(
     PIMAGE_TLS_CALLBACK         *callbacks  = NULL;
     PIMAGE_RELOC                list        = NULL;
     PIMAGE_BASE_RELOCATION      ibr         = NULL;
+#ifdef _WIN64
+    PRUNTIME_FUNCTION           func_table  = NULL;
+#endif
     DWORD                       rva         = 0;
     DWORD                       size        = 0;
     PDWORD                      adr         = NULL;
@@ -143,6 +146,35 @@ BOOL load_pe(
             ibr = (PIMAGE_BASE_RELOCATION)list;
         }
     }
+
+#ifdef _WIN64
+    rva  = ntnew->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
+
+    if (rva != 0)
+    {
+        /*
+         * In this section, we try to add support for C++ Exceptions.
+         * To achieve this, we update the inverted function table
+         * given that this memory structure is (for some reason) important
+         * while dealing with exceptions.
+         */
+
+        func_table = RVA2VA(PRUNTIME_FUNCTION, pe_base, rva);
+        size = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
+
+        // most PE loaders do this but I haven't found it useful
+        //RtlAddFunctionTable(func_table, size / sizeof(RUNTIME_FUNCTION), pe_base);
+
+        if (!insert_inverted_function_table_entry(pe_base, pe_size, func_table, size))
+        {
+            DPRINT("Failed to insert new entry in the inverted function table");
+            goto Cleanup;
+        }
+
+        // remember the function table so we can cleanup later
+        peinfo->func_table = func_table;
+    }
+#endif
 
     rva = ntnew->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
 
@@ -424,6 +456,14 @@ BOOL load_pe(
 Cleanup:
     if (pe_base)
     {
+#ifdef _WIN64
+        if (peinfo->func_table)
+        {
+            remove_inverted_function_table_entry(peinfo->func_table);
+            peinfo->func_table = NULL;
+        }
+#endif
+
         peinfo->pe_base = pe_base;
         peinfo->pe_size = 0;
         status = NtFreeVirtualMemory(NtCurrentProcess(), &peinfo->pe_base, &peinfo->pe_size, MEM_RELEASE);

@@ -6,6 +6,23 @@
 #define intAlloc(size) HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size)
 #define intFree(addr) HeapFree(GetProcessHeap(), 0, addr)
 
+typedef struct _INVERTED_FUNCTION_TABLE_ENTRY
+{
+    PVOID FunctionTable;
+    PVOID ImageBase;
+    ULONG SizeOfImage;
+    ULONG SizeOfTable;
+} INVERTED_FUNCTION_TABLE_ENTRY, *PINVERTED_FUNCTION_TABLE_ENTRY;
+
+typedef struct _INVERTED_FUNCTION_TABLE_KERNEL_MODE
+{
+    ULONG CurrentSize;
+    ULONG MaximumSize;
+    volatile ULONG Epoch;
+    UCHAR Overflow;
+    struct _INVERTED_FUNCTION_TABLE_ENTRY TableEntry[256];
+} INVERTED_FUNCTION_TABLE_KERNEL_MODE, *PINVERTED_FUNCTION_TABLE_KERNEL_MODE;
+
 typedef enum _MEMORY_INFORMATION_CLASS
 {
 	MemoryBasicInformation,
@@ -36,11 +53,13 @@ WINBASEAPI NTSTATUS NTAPI NTDLL$NtClose(HANDLE Handle);
 WINBASEAPI NTSTATUS NTAPI NTDLL$RtlUnicodeStringToAnsiString(PANSI_STRING DestinationString, PCUNICODE_STRING SourceString, BOOLEAN AllocateDestinationString);
 WINBASEAPI NTSTATUS NTAPI NTDLL$NtQueryVirtualMemory(HANDLE ProcessHandle, PVOID BaseAddress, MEMORY_INFORMATION_CLASS MemoryInformationClass, PVOID MemoryInformation, SIZE_T MemoryInformationLength, PSIZE_T ReturnLength);
 WINBASEAPI NTSTATUS NTAPI NTDLL$NtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList);
+WINBASEAPI SIZE_T NTSYSAPI NTDLL$RtlCompareMemory(VOID *Source1, VOID *Source2, SIZE_T Length);
 
-WINBASEAPI int   __cdecl MSVCRT$_stricmp(const char *string1,const char *string2);
-WINBASEAPI void  __cdecl MSVCRT$memset(void *dest, int c, size_t count);
-WINBASEAPI PVOID __cdecl MSVCRT$memcpy(void * __restrict__ _Dst,const void * __restrict__ _Src,size_t _MaxCount);
-WINBASEAPI int   __cdecl MSVCRT$strncmp(const char *s1, const char *s2, size_t n);
+WINBASEAPI  int   __cdecl MSVCRT$_stricmp(const char *string1,const char *string2);
+WINBASEAPI void   __cdecl MSVCRT$memset(void *dest, int c, size_t count);
+WINBASEAPI PVOID  __cdecl MSVCRT$memcpy(void * __restrict__ _Dst,const void * __restrict__ _Src,size_t _MaxCount);
+WINBASEAPI int    __cdecl MSVCRT$strncmp(const char *s1, const char *s2, size_t n);
+WINBASEAPI int    __cdecl MSVCRT$strcmp(const char *s1, const char *s2);
 
 WINBASEAPI HANDLE WINAPI KERNEL32$GetProcessHeap(VOID);
 WINBASEAPI void * WINAPI KERNEL32$HeapAlloc (HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes);
@@ -68,11 +87,13 @@ WINBASEAPI BOOL   WINAPI KERNEL32$FreeLibrary(HANDLE hLibModule);
 #define RtlUnicodeStringToAnsiString NTDLL$RtlUnicodeStringToAnsiString
 #define NtQueryVirtualMemory         NTDLL$NtQueryVirtualMemory
 #define NtCreateThreadEx             NTDLL$NtCreateThreadEx
+#define RtlCompareMemory             NTDLL$RtlCompareMemory
 
 #define _stricmp                     MSVCRT$_stricmp
 #define memset                       MSVCRT$memset
 #define memcpy                       MSVCRT$memcpy
 #define strncmp                      MSVCRT$strncmp
+#define strcmp                       MSVCRT$strcmp
 
 #define GetProcessHeap               KERNEL32$GetProcessHeap
 #define HeapAlloc                    KERNEL32$HeapAlloc

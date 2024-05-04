@@ -199,6 +199,11 @@ Cleanup:
         BeaconRemoveValue(NC_HANDLE_INFO_KEY);
     }
 
+#ifdef _WIN64
+    if (peinfo && peinfo->func_table)
+        remove_inverted_function_table_entry(peinfo->func_table);
+#endif
+
     if (peinfo && peinfo->pe_base)
     {
         peinfo->pe_size = 0;

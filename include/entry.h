@@ -75,5 +75,6 @@ typedef struct _LOADED_PE_INFO {
     PVOID        original_ucrtbase_stdout;
     PVOID        original_ucrtbase_stderr;
     HANDLE       original_console_handle;
+    PVOID        func_table;
 } LOADED_PE_INFO, * PLOADED_PE_INFO;
 

@@ -1,4 +1,5 @@
 #include "utils.h"
+#include <stddef.h>
 
 // check if bytes are from a windows PE
 BOOL is_pe(
@@ -73,6 +74,8 @@ VOID store_loaded_dll(
 
     // add this DLL to the linked list
     lib_loaded = intAlloc((sizeof(LIB_LOADED)));
+    if (!lib_loaded)
+        return;
     memcpy(lib_loaded->name, name, MAX_PATH);
     lib_loaded->address = dll;
     lib_loaded->next    = peinfo->libs_loaded;
@@ -298,6 +301,11 @@ VOID run_xor_on_pe(
     BYTE  tmp     = 0;
 
     xor_key = intAlloc(saved_pe->xor_length);
+    if (!xor_key)
+    {
+        malloc_failed();
+        return;
+    }
     memcpy(xor_key, saved_pe->xor_key, saved_pe->xor_length);
 
     if (saved_pe->encrypted)
@@ -558,3 +566,262 @@ BOOL remove_saved_pe(
 
     return TRUE;
 }
+
+#ifdef _WIN64
+
+/*
+ * The .mrdata section where the inverted function table
+ * is stored is read-only by default, we need to set it to
+ * read-write before we add a new entry and restore it
+ * once we are done
+ */
+BOOL protect_inverted_function_table(
+    IN BOOL protect)
+{
+    PVOID                  stBegin   = 0;
+    SIZE_T                 len       = 0;
+    PIMAGE_NT_HEADERS      nt        = NULL;
+    PIMAGE_SECTION_HEADER  pSection  = NULL;
+    DWORD                  newprot   = protect ? PAGE_READONLY : PAGE_READWRITE;
+    DWORD                  oldprot   = 0;
+    NTSTATUS               status    = STATUS_UNSUCCESSFUL;
+    PIMAGE_DOS_HEADER      dos       = NULL;
+
+    dos = xGetLibAddress("ntdll", TRUE, NULL);
+    nt  = RVA2VA(PIMAGE_NT_HEADERS, dos, dos->e_lfanew);
+
+    // find the .mrdata section
+    pSection = IMAGE_FIRST_SECTION(nt);
+    for (INT i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        if (!strcmp(".mrdata", (LPCSTR)pSection->Name))
+        {
+            stBegin = RVA2VA(PVOID, dos, pSection->VirtualAddress);
+            len = pSection->Misc.VirtualSize;
+            break;
+        }
+
+        ++pSection;
+    }
+
+    if (!stBegin || !len)
+    {
+        DPRINT("Failed to find section");
+        return FALSE;
+    }
+
+    status = NtProtectVirtualMemory(NtCurrentProcess(), &stBegin, &len, newprot, &oldprot);
+    if (!NT_SUCCESS(status))
+    {
+        syscall_failed("NtProtectVirtualMemory", status);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/*
+ * The inverted function table is stored at .mrdata
+ * and it holds one entry for each currently loaded DLL
+ * that has an exception directory.
+ * We can find it in memory by loking for NTDLL's entry
+ * which is always first in the array.
+ */
+PVOID find_inverted_function_table()
+{
+    PVOID                         stEnd       = 0;
+    PVOID                         stBegin     = 0;
+    DWORD                         dwLen       = 0;
+    DWORD                         rva         = 0;
+    SIZE_T                        stRet       = 0;
+    PIMAGE_NT_HEADERS             nt          = NULL;
+    PIMAGE_SECTION_HEADER         pSection    = NULL;
+    INVERTED_FUNCTION_TABLE_ENTRY ntdll_entry = { 0 };
+    PIMAGE_DOS_HEADER             dos         = NULL;
+
+    // reference: https://github.com/bats3c/DarkLoadLibrary/blob/6de15faa2cbc2b909500a67e854980deb0c0ba8c/DarkLoadLibrary/src/pebutils.c#L59
+
+    dos = xGetLibAddress("ntdll", TRUE, NULL);
+    nt  = RVA2VA(PIMAGE_NT_HEADERS, dos, dos->e_lfanew);
+    rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
+
+    // create a copy of NTDLL's entry so we know what we are looking for
+    ntdll_entry.FunctionTable = RVA2VA(PVOID, dos, rva);
+    ntdll_entry.ImageBase     = dos;
+    ntdll_entry.SizeOfImage   = nt->OptionalHeader.SizeOfImage;
+    ntdll_entry.SizeOfTable   = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
+
+    // find the .mrdata section on NTDLL
+    pSection = IMAGE_FIRST_SECTION(nt);
+    for (INT i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        if (!strcmp(".mrdata", (LPCSTR)pSection->Name))
+        {
+            stBegin = RVA2VA(PVOID, dos, pSection->VirtualAddress);
+            dwLen = pSection->Misc.VirtualSize;
+            break;
+        }
+
+        ++pSection;
+    }
+
+    if (!stBegin || !dwLen)
+    {
+        DPRINT("Failed to find section");
+        return NULL;
+    }
+
+    // look for NTDLL's entry
+    for (DWORD i = 0; i < dwLen - sizeof(INVERTED_FUNCTION_TABLE_ENTRY); ++i)
+    {
+        stRet = RtlCompareMemory(stBegin, &ntdll_entry, sizeof(INVERTED_FUNCTION_TABLE_ENTRY));
+
+        if (stRet == sizeof(INVERTED_FUNCTION_TABLE_ENTRY))
+        {
+            stEnd = stBegin;
+            break;
+        }
+
+        stBegin = RVA2VA(PVOID, stBegin, 1);
+    }
+
+    if (!stEnd)
+    {
+        DPRINT("Failed to find inverted function table");
+        return NULL;
+    }
+
+    // get the base of the structure
+    stEnd = RVA2VA(PVOID, stEnd, - offsetof(INVERTED_FUNCTION_TABLE_KERNEL_MODE, TableEntry));
+
+    return stEnd;
+}
+
+/*
+ * The code below is (mostly) equivalent to ntdll!RtlpInsertInvertedFunctionTableEntry,
+ * but we do this by hand because that API is not exported by NTDLL.
+ * Given that we are dealing with internal undocumented Windows structures,
+ * there is no guarantee that this will work on older or newer versions.
+ * This has been tested on Windows 10.0.19045, YMMV
+ */
+BOOL insert_inverted_function_table_entry(
+    IN PVOID base_address,
+    IN SIZE_T size_of_image,
+    IN PRUNTIME_FUNCTION func_table,
+    IN DWORD size_of_table)
+{
+    BOOL                                 Success   = FALSE;
+    BOOL                                 is_unprot = FALSE;
+    DWORD                                num_elems = 0;
+    PINVERTED_FUNCTION_TABLE_KERNEL_MODE ift       = NULL;
+    PINVERTED_FUNCTION_TABLE_ENTRY       fte       = NULL;
+
+    ift = find_inverted_function_table();
+    if (!ift)
+        goto Cleanup;
+
+    if (!protect_inverted_function_table(FALSE))
+        goto Cleanup;
+
+    is_unprot = TRUE;
+
+    if (ift->CurrentSize == ift->MaximumSize)
+    {
+        ift->Overflow = 1;
+        DPRINT("Too many entries in the inverted function table");
+        goto Cleanup;
+    }
+
+    //ift->Epoch++;
+    num_elems = 1;
+    if (ift->CurrentSize != 1)
+    {
+        if (ift->CurrentSize > 1)
+        {
+            fte = &ift->TableEntry[0];
+            do
+            {
+                if (base_address < fte->FunctionTable)
+                    break;
+
+                num_elems++;
+                fte++;
+            } while(num_elems < ift->CurrentSize);
+        }
+
+        if (num_elems != ift->CurrentSize)
+        {
+            memcpy(
+                &ift->TableEntry[num_elems + 1],
+                &ift->TableEntry[num_elems],
+                (ift->CurrentSize - num_elems) * sizeof(INVERTED_FUNCTION_TABLE_ENTRY));
+        }
+    }
+
+    ift->TableEntry[num_elems].FunctionTable = func_table;
+    ift->TableEntry[num_elems].ImageBase     = base_address;
+    ift->TableEntry[num_elems].SizeOfImage   = size_of_image;
+    ift->TableEntry[num_elems].SizeOfTable   = size_of_table;
+
+    ift->CurrentSize++;
+    //ift->Epoch++;
+
+    Success = TRUE;
+
+Cleanup:
+    if (is_unprot)
+        protect_inverted_function_table(TRUE);
+
+    return Success;
+}
+
+/*
+ * Once we are done, we remove our entry from the inverted function table
+ */
+BOOL remove_inverted_function_table_entry(
+    IN PRUNTIME_FUNCTION func_table)
+{
+    BOOL                                 Success   = FALSE;
+    BOOL                                 is_unprot = FALSE;
+    PINVERTED_FUNCTION_TABLE_KERNEL_MODE ift       = NULL;
+    PINVERTED_FUNCTION_TABLE_ENTRY       fte       = NULL;
+
+    ift = find_inverted_function_table();
+    if (!ift)
+        goto Cleanup;
+
+    for (DWORD i = 0; i < ift->CurrentSize; ++i)
+    {
+        fte = &ift->TableEntry[i];
+
+        if (fte->FunctionTable == func_table)
+        {
+            if (!protect_inverted_function_table(FALSE))
+                goto Cleanup;
+
+            is_unprot = TRUE;
+
+            if (ift->CurrentSize != i + 1)
+            {
+                memcpy(
+                    &ift->TableEntry[i],
+                    &ift->TableEntry[i + 1],
+                    (ift->CurrentSize - i - 1) * sizeof(INVERTED_FUNCTION_TABLE_ENTRY));
+            }
+
+            ift->CurrentSize--;
+
+            break;
+        }
+    }
+
+    Success = TRUE;
+
+Cleanup:
+    if (is_unprot)
+        protect_inverted_function_table(TRUE);
+
+    return Success;
+}
+
+#endif

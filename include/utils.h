@@ -15,6 +15,17 @@ FARPROC my_get_proc_address(
     IN HMODULE hModule,
     IN LPSTR lpProcName);
 
+#ifdef _WIN64
+BOOL insert_inverted_function_table_entry(
+    IN PVOID base_address,
+    IN SIZE_T size_of_image,
+    IN PRUNTIME_FUNCTION func_table,
+    IN DWORD size_of_table);
+
+BOOL remove_inverted_function_table_entry(
+    IN PRUNTIME_FUNCTION func_table);
+#endif
+
 HANDLE get_console_handle(VOID);
 
 VOID set_console_handle(

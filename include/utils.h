@@ -15,6 +15,9 @@ FARPROC my_get_proc_address(
     IN HMODULE hModule,
     IN LPSTR lpProcName);
 
+HMODULE my_get_module_handle_w(
+  IN LPCWSTR lpModuleName);
+
 #ifdef _WIN64
 BOOL insert_inverted_function_table_entry(
     IN PVOID base_address,

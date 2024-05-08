@@ -237,12 +237,18 @@ BOOL load_pe(
                     // if this is an exit-related API, replace it with RtlExitUserThread
                     if (IsExitAPI(ibn->Name))
                     {
-                        DPRINT("Replacing %s!%s with ntdll!RtlExitUserThread", name, ibn->Name);
+                        DPRINT("IAT hooking %s!%s with ntdll!RtlExitUserThread", name, ibn->Name);
                         ft->u1.Function = (ULONG_PTR)xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
                     }
                     else if (!_stricmp(ibn->Name, "GetProcAddress"))
                     {
+                        DPRINT("IAT hooking %s!%s with my_get_proc_address", name, ibn->Name);
                         ft->u1.Function = (ULONG_PTR)my_get_proc_address;
+                    }
+                    else if (!_stricmp(ibn->Name, "GetModuleHandleW"))
+                    {
+                        DPRINT("IAT hooking %s!%s with my_get_module_handle_w", name, ibn->Name);
+                        ft->u1.Function = (ULONG_PTR)my_get_module_handle_w;
                     }
                     else
                     {

@@ -75,6 +75,9 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->alloc_console = alloc_console;
     peinfo->unload_libs   = unload_libs;
 
+    // save a reference to peinfo
+    BeaconAddValue(NC_PE_INFO_KEY, peinfo);
+
     if (list_pes)
     {
         list_saved_pes();
@@ -283,6 +286,8 @@ Cleanup:
         memset(peinfo, 0, sizeof(LOADED_PE_INFO));
         intFree(peinfo);
     }
+
+    BeaconRemoveValue(NC_PE_INFO_KEY);
 
     return 0;
 }

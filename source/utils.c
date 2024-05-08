@@ -111,6 +111,38 @@ FARPROC my_get_proc_address(
     }
 }
 
+/*
+ * If the PE calls GetModuleHandleW(NULL), we need to return
+ * the base of our module, instead of the base of the host process
+ */
+HMODULE my_get_module_handle_w(
+  IN LPCWSTR lpModuleName)
+{
+    PLOADED_PE_INFO peinfo = NULL;
+
+    if (!lpModuleName)
+    {
+        peinfo = BeaconGetValue(NC_PE_INFO_KEY);
+        if (peinfo)
+        {
+            DPRINT("GetModuleHandleW(NULL) was called, returning 0x%p", peinfo->pe_base);
+            return peinfo->pe_base;
+        }
+    }
+
+    // call the original GetModuleHandleW
+    HMODULE ( WINAPI *GetModuleHandleW ) ( LPCWSTR ) = xGetProcAddress(xGetLibAddress("kernelbase", TRUE, NULL), "GetModuleHandleW", 0);
+    if (GetModuleHandleW)
+    {
+        return GetModuleHandleW(lpModuleName);
+    }
+    else
+    {
+        api_not_found("GetModuleHandleW");
+        return NULL;
+    }
+}
+
 HANDLE get_console_handle(VOID)
 {
     uPRTL_USER_PROCESS_PARAMETERS ProcessParameters = (uPRTL_USER_PROCESS_PARAMETERS)NtCurrentTeb()->ProcessEnvironmentBlock->ProcessParameters;
@@ -276,7 +308,7 @@ PSAVED_PE find_pe_by_name(
 {
     PSAVED_PE saved_pe = NULL;
 
-    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
+    saved_pe = BeaconGetValue(NC_SAVED_PE_KEY);
     while (saved_pe)
     {
         if (!_stricmp(saved_pe->pe_name, pe_name))
@@ -413,11 +445,11 @@ BOOL save_pe_info(
     memcpy(saved_pe->loadtime, loadtime, MAX_PATH);
 
     // add PE to linked list
-    tmp = BeaconGetValue(NC_PE_INFO_KEY);
+    tmp = BeaconGetValue(NC_SAVED_PE_KEY);
     if (!tmp)
     {
         // save the PE linked list
-        if (!BeaconAddValue(NC_PE_INFO_KEY, saved_pe))
+        if (!BeaconAddValue(NC_SAVED_PE_KEY, saved_pe))
         {
             function_failed("BeaconAddValue");
             return FALSE;
@@ -491,7 +523,7 @@ VOID list_saved_pes()
 {
     PSAVED_PE saved_pe = NULL;
 
-    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
+    saved_pe = BeaconGetValue(NC_SAVED_PE_KEY);
     if (!saved_pe)
     {
         PRINT("There are no saved PEs in memory");
@@ -514,7 +546,7 @@ BOOL remove_saved_pe(
     PSAVED_PE tmp      = NULL;
 
     // look for the PE by name
-    saved_pe = BeaconGetValue(NC_PE_INFO_KEY);
+    saved_pe = BeaconGetValue(NC_SAVED_PE_KEY);
     while (saved_pe)
     {
         if (!_stricmp(saved_pe->pe_name, pe_name))
@@ -522,7 +554,7 @@ BOOL remove_saved_pe(
             // remove PE from linked list
             if (!tmp)
             {
-                if (!BeaconRemoveValue(NC_PE_INFO_KEY))
+                if (!BeaconRemoveValue(NC_SAVED_PE_KEY))
                 {
                     function_failed("BeaconRemoveValue");
                     return FALSE;
@@ -530,7 +562,7 @@ BOOL remove_saved_pe(
 
                 if (saved_pe->next)
                 {
-                    if (!BeaconAddValue(NC_PE_INFO_KEY, saved_pe->next))
+                    if (!BeaconAddValue(NC_SAVED_PE_KEY, saved_pe->next))
                     {
                         function_failed("BeaconAddValue");
                         return FALSE;

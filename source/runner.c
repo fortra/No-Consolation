@@ -76,7 +76,7 @@ BOOL prepare_thread(
              * we do that with our current thread (meaning, no hwbp)
              */
 
-            DPRINT("Executing entrypoint of DLL: 0x%p", peinfo->DllMain);
+            DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
 
             DllMain = peinfo->DllMain;
             DllMain(peinfo->pe_base, DLL_PROCESS_ATTACH, NULL);
@@ -279,7 +279,8 @@ BOOL read_output(
 BOOL run_pe(
     IN PLOADED_PE_INFO peinfo)
 {
-    BOOL aborted = FALSE;
+    BOOL      aborted = FALSE;
+    DllMain_t DllMain = NULL;
 
     if (!prepare_thread(peinfo))
     {
@@ -289,6 +290,20 @@ BOOL run_pe(
     if (!resume_thread(peinfo))
     {
         return FALSE;
+    }
+
+    if (peinfo->is_dll && !aborted)
+    {
+        /*
+         * The DLL's thread has exited,
+         * now we call DllMain with DLL_PROCESS_DETACH.
+         * We only do this when the PE exits gracefully
+         */
+
+        DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_DETACH, NULL)");
+
+        DllMain = peinfo->DllMain;
+        DllMain(peinfo->pe_base, DLL_PROCESS_DETACH, NULL);
     }
 
     if (!read_output(peinfo, &aborted))

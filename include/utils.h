@@ -11,11 +11,11 @@ VOID store_loaded_dll(
     IN HMODULE dll,
     IN PCHAR name);
 
-FARPROC my_get_proc_address(
+FARPROC WINAPI my_get_proc_address(
     IN HMODULE hModule,
     IN LPSTR lpProcName);
 
-HMODULE my_get_module_handle_w(
+HMODULE WINAPI my_get_module_handle_w(
   IN LPCWSTR lpModuleName);
 
 #ifdef _WIN64

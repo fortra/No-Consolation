@@ -89,7 +89,7 @@ VOID store_loaded_dll(
  * PsExec searches for mscoree!CorExitProcess and calls it if found.
  * This only happens if the CLR is loaded (i.e. PowerShell has been run)
  */
-FARPROC my_get_proc_address(
+FARPROC WINAPI my_get_proc_address(
     IN HMODULE hModule,
     IN LPSTR lpProcName)
 {
@@ -115,7 +115,7 @@ FARPROC my_get_proc_address(
  * If the PE calls GetModuleHandleW(NULL), we need to return
  * the base of our module, instead of the base of the host process
  */
-HMODULE my_get_module_handle_w(
+HMODULE WINAPI my_get_module_handle_w(
   IN LPCWSTR lpModuleName)
 {
     PLOADED_PE_INFO peinfo = NULL;

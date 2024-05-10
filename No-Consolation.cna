@@ -1,7 +1,7 @@
 
 alias noconsolation
 {
-    local('$bid $barch $PE $args $path $path_set $name_set $pebytes $x $matchfound $pe_id $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs $dont_save $list_pes $unload_pe');
+    local('$bid $barch $PE $args $path $path_set $name_set $pebytes $x $matchfound $pe_id $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs $dont_save $list_pes $unload_pe $link_to_peb');
 
     $bid = $1;
     $pe_id = 0;
@@ -22,6 +22,7 @@ alias noconsolation
     $dont_save = 0;
     $list_pes = 0;
     $unload_pe = '';
+    $link_to_peb = 1;
 
     # make sure the beacon is not WoW64
     $is64 = binfo($bid, "is64");
@@ -116,6 +117,10 @@ alias noconsolation
             }
 
             $unload_pe = @_[$i];
+        }
+        else if (@_[$i] eq "--link-to-peb" || @_[$i] eq "-ltp")
+        {
+            $link_to_peb = 1;
         }
         else if (-exists @_[$i] || @_[$i] ismatch '^\p{Alpha}:\\\\.*')
         {
@@ -212,7 +217,7 @@ alias noconsolation
         }
     }
 
-    runpe($bid, $pename, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs, $dont_save, $list_pes, $unload_pe, mynick(), tstamp(ticks()));
+    runpe($bid, $pename, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs, $dont_save, $list_pes, $unload_pe, mynick(), tstamp(ticks()), $link_to_peb);
 }
 
 sub runpe{
@@ -228,7 +233,7 @@ sub runpe{
     }
 
     # Pack the arguments
-    $args = bof_pack($1, "zbziiiZzziiiiiiizzz", $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19);
+    $args = bof_pack($1, "zbziiiZzziiiiiiizzzi", $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20);
 
     # Execute BOF
     beacon_inline_execute($1, $data, "go", $args);
@@ -240,8 +245,9 @@ beacon_command_register(
     "
 Summary: Run an unmanaged EXE/DLL inside Beacon's memory.
 
-Usage: noconsolation [--local] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] /path/to/binary.exe arg1 arg2
+Usage: noconsolation [--local] [--link-to-peb] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] /path/to/binary.exe arg1 arg2
     --local, -l                           Optional. The binary should be loaded from the target Windows machine
+    --link-to-peb, -ltp                   Optional. Load the PE into the PEB
     --timeout NUM_SECONDS, -t NUM_SECONDS Optional. The number of seconds you wish to wait for the PE to complete running. Default 60 seconds. Set to 0 to disable
     -k                                    Optional. Overwrite the PE headers
     --method EXPORT_NAME, -m EXPORT_NAME  Optional. Method or function name to execute in case of DLL. If not provided, DllMain will be executed

@@ -1,5 +1,4 @@
 #include "utils.h"
-#include <stddef.h>
 
 // check if bytes are from a windows PE
 BOOL is_pe(
@@ -724,7 +723,7 @@ PVOID find_inverted_function_table()
     }
 
     // get the base of the structure
-    stEnd = RVA2VA(PVOID, stEnd, - offsetof(INVERTED_FUNCTION_TABLE_KERNEL_MODE, TableEntry));
+    stEnd = CONTAINING_RECORD(stEnd, INVERTED_FUNCTION_TABLE_KERNEL_MODE, TableEntry);
 
     return stEnd;
 }

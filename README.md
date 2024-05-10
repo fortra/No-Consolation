@@ -8,6 +8,7 @@ This is a Beacon Object File (BOF) that executes unmanaged PEs inline and retrie
 - Supports 64 and 32 bits
 - Supports EXEs and DLLs
 - Does not create new processes
+- Links modules to the PEB
 - Saves binaries in memory
 - Supports C++ exceptions (x64 only)
 
@@ -15,8 +16,9 @@ This is a Beacon Object File (BOF) that executes unmanaged PEs inline and retrie
 ```
 Summary: Run an unmanaged EXE/DLL inside Beacon's memory.
 
-Usage: noconsolation [--local] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] /path/to/binary.exe arg1 arg2
+Usage: noconsolation [--local] [--link-to-peb] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] /path/to/binary.exe arg1 arg2
     --local, -l                           Optional. The binary should be loaded from the target Windows machine
+    --link-to-peb, -ltp                   Optional. Load the PE into the PEB
     --timeout NUM_SECONDS, -t NUM_SECONDS Optional. The number of seconds you wish to wait for the PE to complete running. Default 60 seconds. Set to 0 to disable
     -k                                    Optional. Overwrite the PE headers
     --method EXPORT_NAME, -m EXPORT_NAME  Optional. Method or function name to execute in case of DLL. If not provided, DllMain will be executed
@@ -57,3 +59,4 @@ Finally, if you want to run a binary without it being automatically loaded in me
 - [Octoberfest7](https://twitter.com/octoberfest73) for [Inline-Execute-PE](https://github.com/Octoberfest7/Inline-Execute-PE) which was my inspiration for this project
 - [modexp](https://twitter.com/modexpblog) and [TheWover](https://twitter.com/TheRealWover) for the PE load logic from [donut](https://github.com/TheWover/donut)
 - [rad9800](https://twitter.com/rad9800) for his [HWBP engine](https://github.com/rad9800/hwbp4mw)
+- [batsec](https://twitter.com/_batsec_) for [DarkLoadLibrary](https://github.com/bats3c/DarkLoadLibrary)

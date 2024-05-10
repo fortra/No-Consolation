@@ -8,19 +8,19 @@ LPVOID find_reference(
     IN PCHAR dll_name,
     IN PCHAR api_name)
 {
-    PPEB                  peb  = NULL;
-    PPEB_LDR_DATA         ldr  = NULL;
-    PLDR_DATA_TABLE_ENTRY dte  = NULL;
-    LPVOID                addr = NULL;
-    LPVOID                base = NULL;
+    PPEB2                  peb  = NULL;
+    PPEB_LDR_DATA2         ldr  = NULL;
+    PLDR_DATA_TABLE_ENTRY2 dte  = NULL;
+    LPVOID                 addr = NULL;
+    LPVOID                 base = NULL;
 
-    peb = (PPEB)NtCurrentTeb()->ProcessEnvironmentBlock;
-    ldr = (PPEB_LDR_DATA)peb->Ldr;
+    peb = (PPEB2)READ_MEMLOC(PEB_OFFSET);
+    ldr = (PPEB_LDR_DATA2)peb->Ldr;
 
     // for each DLL loaded
-    for (dte=(PLDR_DATA_TABLE_ENTRY)ldr->Reserved2[1];
-       dte->DllBase != NULL && addr == NULL;
-       dte=(PLDR_DATA_TABLE_ENTRY)dte->Reserved1[0])
+    for (dte=(PLDR_DATA_TABLE_ENTRY2)ldr->InLoadOrderModuleList.Flink;
+         dte->DllBase != NULL && addr == NULL;
+         dte=(PLDR_DATA_TABLE_ENTRY2)dte->InLoadOrderLinks.Flink)
     {
         base = dte->DllBase;
         // if this is the dll with the reference, continue
@@ -146,11 +146,11 @@ LPVOID xGetLibAddress(
     IN BOOL load,
     OUT PBOOL loaded)
 {
-    PPEB                    peb          = NULL;
-    PPEB_LDR_DATA           ldr          = NULL;
+    PPEB2                   peb          = NULL;
+    PPEB_LDR_DATA2          ldr          = NULL;
     PIMAGE_DOS_HEADER       dos          = NULL;
     PIMAGE_NT_HEADERS       nt           = NULL;
-    PLDR_DATA_TABLE_ENTRY   dte          = NULL;
+    PLDR_DATA_TABLE_ENTRY2  dte          = NULL;
     PIMAGE_EXPORT_DIRECTORY exp          = NULL;
     LPVOID                  addr         = NULL;
     LPVOID                  base         = NULL;
@@ -178,13 +178,13 @@ LPVOID xGetLibAddress(
         dll_name[i++] = 0;
     }
 
-    peb = (PPEB)NtCurrentTeb()->ProcessEnvironmentBlock;
-    ldr = (PPEB_LDR_DATA)peb->Ldr;
+    peb = (PPEB2)READ_MEMLOC(PEB_OFFSET);
+    ldr = (PPEB_LDR_DATA2)peb->Ldr;
 
     // for each DLL loaded
-    for (dte=(PLDR_DATA_TABLE_ENTRY)ldr->Reserved2[1];
+    for (dte=(PLDR_DATA_TABLE_ENTRY2)ldr->InLoadOrderModuleList.Flink;
          correct != 0 && dte->DllBase != NULL && addr == NULL;
-         dte=(PLDR_DATA_TABLE_ENTRY)dte->Reserved1[0])
+         dte=(PLDR_DATA_TABLE_ENTRY2)dte->InLoadOrderLinks.Flink)
     {
         base = dte->DllBase;
         dos  = (PIMAGE_DOS_HEADER)base;
@@ -213,4 +213,464 @@ LPVOID xGetLibAddress(
             *loaded = TRUE;
     }
     return addr;
+}
+
+ULONG ldr_hash_entry(
+    IN UNICODE_STRING UniName,
+    IN BOOL XorHash)
+{
+    ULONG ulRes = 0;
+
+    NTSTATUS ( WINAPI *RtlHashUnicodeString ) ( PCUNICODE_STRING, BOOLEAN, ULONG, PULONG ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlHashUnicodeString", 0);
+    if (!RtlHashUnicodeString)
+    {
+        api_not_found("RtlHashUnicodeString");
+        return 0;
+    }
+
+    RtlHashUnicodeString(&UniName, TRUE, 0, &ulRes);
+
+    if (XorHash)
+    {
+        ulRes &= (LDR_HASH_TABLE_ENTRIES - 1);
+    }
+
+    return ulRes;
+}
+
+#ifdef _WIN64
+
+PLDR_DATA_TABLE_ENTRY2 find_ldr_table_entry(
+    IN PCWSTR BaseName)
+{
+    PPEB2                  peb        = NULL;
+    PLDR_DATA_TABLE_ENTRY2 pCurEntry  = NULL;
+    PLIST_ENTRY            pListHead  = NULL;
+    PLIST_ENTRY            pListEntry = NULL;
+
+    peb = (PPEB2)READ_MEMLOC(PEB_OFFSET);
+
+    pListHead  = &peb->Ldr->InLoadOrderModuleList;
+    pListEntry = pListHead->Flink;
+
+    do
+    {
+        pCurEntry  = CONTAINING_RECORD(pListEntry, LDR_DATA_TABLE_ENTRY2, InLoadOrderLinks);
+        pListEntry = pListEntry->Flink;
+
+        if (wcscmp(BaseName, pCurEntry->BaseDllName.Buffer) == 0)
+            return pCurEntry;
+    } while (pListEntry != pListHead);
+
+    DPRINT_ERR("Failed to find FindLdr table entry for %ls", BaseName);
+
+    return NULL;
+}
+
+/*
+ * Try to find the address of ntdll!LdrpModuleBaseAddressIndex
+ */
+PRTL_RB_TREE find_module_base_address_index(VOID)
+{
+    SIZE_T                 stEnd             = 0;
+    PRTL_BALANCED_NODE     pNode             = NULL;
+    PRTL_RB_TREE           pModBaseAddrIndex = NULL;
+    PLDR_DATA_TABLE_ENTRY2 ldr_entry         = NULL;
+    PIMAGE_NT_HEADERS      nt                = NULL;
+    PIMAGE_SECTION_HEADER  sh                = NULL;
+    SIZE_T                 stRet             = 0;
+    DWORD                  dwLen             = 0;
+    SIZE_T                 stBegin           = 0;
+
+    ldr_entry = find_ldr_table_entry(L"ntdll.dll");
+    if (!ldr_entry)
+        return NULL;
+
+    pNode = &ldr_entry->BaseAddressIndexNode;
+
+    do
+    {
+        pNode = (PRTL_BALANCED_NODE)(pNode->ParentValue & (~7));
+    } while (pNode->ParentValue & (~7));
+
+    if (!pNode->Red)
+    {
+        dwLen   = 0;
+        stBegin = 0;
+
+        nt = RVA2VA(
+            PIMAGE_NT_HEADERS,
+            ldr_entry->DllBase,
+            ((PIMAGE_DOS_HEADER)ldr_entry->DllBase)->e_lfanew);
+
+        sh = IMAGE_FIRST_SECTION(nt);
+
+        for (INT i = 0; i < nt->FileHeader.NumberOfSections; i++)
+        {
+            if (!strcmp(".data", (LPCSTR)sh->Name))
+            {
+                stBegin = RVA2VA(SIZE_T, ldr_entry->DllBase, sh->VirtualAddress);
+                dwLen   = sh->Misc.VirtualSize;
+                break;
+            }
+
+            ++sh;
+        }
+
+        if (!stBegin || !dwLen)
+        {
+            DPRINT("Failed to find section");
+            return NULL;
+        }
+
+        for (DWORD i = 0; i < dwLen - sizeof(SIZE_T); ++stBegin, ++i)
+        {
+            stRet = RtlCompareMemory((PVOID)stBegin, &pNode, sizeof(SIZE_T));
+
+            if (stRet == sizeof(SIZE_T))
+            {
+                stEnd = stBegin;
+                break;
+            }
+        }
+
+        if (stEnd)
+        {
+            PRTL_RB_TREE pTree = (PRTL_RB_TREE)stEnd;
+
+            if (pTree && pTree->Root && pTree->Min)
+                pModBaseAddrIndex = pTree;
+        }
+    }
+
+    if (!pModBaseAddrIndex)
+    {
+        DPRINT_ERR("Failed to find module base address index");
+    }
+
+    return pModBaseAddrIndex;
+}
+
+/*
+ * This function is equivalent to ntdll!LdrpInsertModuleToIndexLockHeld
+ */
+BOOL update_base_address_entry(
+    IN PLDR_DATA_TABLE_ENTRY2 ldr_entry,
+    IN BOOL add_entry)
+{
+    PRTL_RB_TREE           pModBaseAddrIndex = NULL;
+    PLDR_DATA_TABLE_ENTRY2 pNodeLdrEntry     = NULL;
+    PRTL_BALANCED_NODE     pLdrNode          = NULL;
+    PRTL_BALANCED_NODE     CurrNode          = NULL;
+    BOOL                   bRight            = FALSE;
+    PVOID                  lpBaseAddr        = ldr_entry->DllBase;
+
+    pModBaseAddrIndex = find_module_base_address_index();
+    if (!pModBaseAddrIndex)
+        return FALSE;
+
+    if (!add_entry)
+    {
+        VOID ( WINAPI *RtlRbRemoveNode ) ( PRTL_RB_TREE, PRTL_BALANCED_NODE ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlRbRemoveNode", 0);
+        if (!RtlRbRemoveNode)
+        {
+            api_not_found("RtlRbRemoveNode");
+            return FALSE;
+        }
+
+        RtlRbRemoveNode(pModBaseAddrIndex, &ldr_entry->BaseAddressIndexNode);
+        return TRUE;
+    }
+
+    pLdrNode = pModBaseAddrIndex->Root;
+    CurrNode = pLdrNode;
+
+    while (pLdrNode != NULL)
+    {
+        CurrNode = pLdrNode;
+
+        pNodeLdrEntry = CONTAINING_RECORD(pLdrNode, LDR_DATA_TABLE_ENTRY2, BaseAddressIndexNode);
+
+        if (pNodeLdrEntry->DllBase <= lpBaseAddr)
+        {
+            pLdrNode = CurrNode->Right;
+
+            if (!pLdrNode)
+            {
+                bRight = TRUE;
+                break;
+            }
+        }
+        else
+        {
+            pLdrNode = CurrNode->Left;
+        }
+    }
+
+    VOID ( WINAPI *RtlRbInsertNodeEx ) ( PRTL_RB_TREE, PRTL_BALANCED_NODE, BOOLEAN, PRTL_BALANCED_NODE ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlRbInsertNodeEx", 0);
+    if (!RtlRbInsertNodeEx)
+    {
+        api_not_found("RtlRbInsertNodeEx");
+        return FALSE;
+    }
+
+    RtlRbInsertNodeEx(pModBaseAddrIndex, CurrNode, bRight, &ldr_entry->BaseAddressIndexNode);
+    ldr_entry->Flags |= 0x80;
+
+    return TRUE;
+}
+
+/*
+ * Find the address of ntdll!LdrpHashTable in memory
+ */
+PLIST_ENTRY find_hash_table(VOID)
+{
+    PPEB2                  peb           = NULL;
+    PLIST_ENTRY            pList         = NULL;
+    PLIST_ENTRY            pHead         = NULL;
+    PLIST_ENTRY            pEntry        = NULL;
+    PLDR_DATA_TABLE_ENTRY2 pCurrentEntry = NULL;
+    ULONG                  ulHash        = 0;
+
+    peb = (PPEB2)READ_MEMLOC(PEB_OFFSET);
+
+    pHead  = &peb->Ldr->InInitializationOrderModuleList;
+    pEntry = pHead->Flink;
+
+    do
+    {
+        pCurrentEntry = CONTAINING_RECORD(
+            pEntry,
+            LDR_DATA_TABLE_ENTRY2,
+            InInitializationOrderLinks);
+
+        pEntry = pEntry->Flink;
+
+        if (pCurrentEntry->HashLinks.Flink == &pCurrentEntry->HashLinks)
+            continue;
+
+        pList = pCurrentEntry->HashLinks.Flink;
+
+        if (pList->Flink == &pCurrentEntry->HashLinks)
+        {
+            ulHash = ldr_hash_entry(pCurrentEntry->BaseDllName, TRUE);
+
+            pList = (PLIST_ENTRY)(
+                (size_t)pCurrentEntry->HashLinks.Flink -
+                ulHash *
+                sizeof(LIST_ENTRY));
+
+            break;
+        }
+
+        pList = NULL;
+    } while (pHead != pEntry);
+
+    if (!pList)
+    {
+        DPRINT_ERR("Failed to find hash table");
+    }
+
+    return pList;
+}
+
+#endif
+
+VOID insert_tail_list(
+    PLIST_ENTRY ListHead,
+    PLIST_ENTRY Entry)
+{
+    PLIST_ENTRY Blink;
+
+    Blink = ListHead->Blink;
+    Entry->Flink = ListHead;
+    Entry->Blink = Blink;
+    Blink->Flink = Entry;
+    ListHead->Blink = Entry;
+}
+
+VOID unlink_from_list(
+    PLIST_ENTRY Entry)
+{
+    Entry->Flink->Blink = Entry->Blink;
+    Entry->Blink->Flink = Entry->Flink;
+}
+
+BOOL unlink_module(
+    IN PLDR_DATA_TABLE_ENTRY2 ldr_entry)
+{
+#ifdef _WIN64
+    PLIST_ENTRY LdrpHashTable = NULL;
+    ULONG       ulHash        = 0;
+
+    LdrpHashTable = find_hash_table();
+    if (!LdrpHashTable)
+        return FALSE;
+
+    // remove from the base address entry
+    if (!update_base_address_entry(ldr_entry, FALSE))
+        return FALSE;
+
+    // remove from the ldr hash table
+    ulHash = ldr_hash_entry(ldr_entry->BaseDllName, TRUE);
+    unlink_from_list(&LdrpHashTable[ulHash]);
+#endif
+
+    // remove from standard lists
+    unlink_from_list(&ldr_entry->InLoadOrderLinks);
+    unlink_from_list(&ldr_entry->InMemoryOrderLinks);
+    unlink_from_list(&ldr_entry->InInitializationOrderLinks);
+
+    return TRUE;
+}
+
+/*
+ * Link the Ldr entry into all the PEB lists
+ */
+BOOL link_ldr_entry(
+    IN PLDR_DATA_TABLE_ENTRY2 ldr_entry)
+{
+    PPEB2          peb           = NULL;
+    PPEB_LDR_DATA2 ldr           = NULL;
+#ifdef _WIN64
+    PLIST_ENTRY    LdrpHashTable = NULL;
+    ULONG          ulHash        = 0;
+
+    LdrpHashTable = find_hash_table();
+    if (!LdrpHashTable)
+        return FALSE;
+
+    // add to the ldr hash table
+    if (!update_base_address_entry(ldr_entry, TRUE))
+        return FALSE;
+
+    // insert into the ldr hash table
+    ulHash = ldr_hash_entry(ldr_entry->BaseDllName, TRUE);
+    insert_tail_list(&LdrpHashTable[ulHash], &ldr_entry->HashLinks);
+#endif
+
+    peb = (PPEB2)READ_MEMLOC(PEB_OFFSET);
+    ldr = (PPEB_LDR_DATA2)peb->Ldr;
+
+    // insert into standard lists
+    insert_tail_list(&ldr->InLoadOrderModuleList, &ldr_entry->InLoadOrderLinks);
+    insert_tail_list(&ldr->InMemoryOrderModuleList, &ldr_entry->InMemoryOrderLinks);
+    insert_tail_list(&ldr->InInitializationOrderModuleList, &ldr_entry->InInitializationOrderLinks);
+
+    return TRUE;
+}
+
+PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
+    IN PLOADED_PE_INFO peinfo,
+    IN PVOID base_address)
+{
+    PIMAGE_NT_HEADERS      nt            = NULL;
+    UNICODE_STRING         full_dll_name = { 0 };
+    UNICODE_STRING         base_dll_name = { 0 };
+    PLDR_DATA_TABLE_ENTRY2 ldr_entry     = NULL;
+
+    nt = RVA2VA(PIMAGE_NT_HEADERS, base_address, ((PIMAGE_DOS_HEADER)base_address)->e_lfanew);
+
+    VOID ( WINAPI *RtlInitUnicodeString ) ( PUNICODE_STRING, PCWSTR ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlInitUnicodeString", 0);
+    if (!RtlInitUnicodeString)
+    {
+        api_not_found("RtlInitUnicodeString");
+        return NULL;
+    }
+
+    // you might want to change these
+    RtlInitUnicodeString(&full_dll_name, L"C:\\Windows\\System32\\NoConsolation.dll");
+    RtlInitUnicodeString(&base_dll_name, L"NoConsolation.dll");
+
+    ldr_entry = intAlloc(sizeof(LDR_DATA_TABLE_ENTRY2));
+    if (!ldr_entry)
+    {
+        malloc_failed();
+        return NULL;
+    }
+
+    NTSTATUS ( WINAPI *NtQuerySystemTime ) ( PLARGE_INTEGER ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "NtQuerySystemTime", 0);
+    if (!NtQuerySystemTime)
+    {
+        api_not_found("NtQuerySystemTime");
+        return NULL;
+    }
+
+    // start setting the values in the entry
+    NtQuerySystemTime(&ldr_entry->LoadTime);
+
+    // do the obvious ones
+    ldr_entry->ReferenceCount        = 1;
+    ldr_entry->LoadReason            = LoadReasonDynamicLoad;
+    ldr_entry->OriginalBase          = nt->OptionalHeader.ImageBase;
+
+    // set the hash value
+    ldr_entry->BaseNameHashValue = ldr_hash_entry(base_dll_name, FALSE);
+
+    // and the rest
+    ldr_entry->ImageDll              = TRUE;
+    ldr_entry->LoadNotificationsSent = TRUE; // lol
+    ldr_entry->EntryProcessed        = TRUE;
+    ldr_entry->InLegacyLists         = TRUE;
+    ldr_entry->InIndexes             = TRUE;
+    ldr_entry->ProcessAttachCalled   = TRUE;
+    ldr_entry->InExceptionTable      = FALSE;
+    ldr_entry->DllBase               = base_address;
+    ldr_entry->SizeOfImage           = nt->OptionalHeader.SizeOfImage;
+    ldr_entry->TimeDateStamp         = nt->FileHeader.TimeDateStamp;
+    ldr_entry->BaseDllName           = base_dll_name;
+    ldr_entry->FullDllName           = full_dll_name;
+    ldr_entry->ObsoleteLoadCount     = 1;
+    ldr_entry->Flags                 = LDRP_IMAGE_DLL | LDRP_ENTRY_INSERTED | LDRP_ENTRY_PROCESSED | LDRP_PROCESS_ATTACH_CALLED;
+
+    // avoid ntdll!LdrpCallInitRoutine from calling DllMain with DLL_THREAD_DETACH on EXEs
+    if (!peinfo->is_dll)
+        ldr_entry->Flags |= LDRP_DONT_CALL_FOR_THREADS;
+
+    // set the correct values in the Ddag node struct
+    ldr_entry->DdagNode = intAlloc(sizeof(LDR_DDAG_NODE));
+    if (!ldr_entry->DdagNode)
+    {
+        malloc_failed();
+        intFree(ldr_entry);
+        return NULL;
+    }
+
+    ldr_entry->NodeModuleLink.Flink    = &ldr_entry->DdagNode->Modules;
+    ldr_entry->NodeModuleLink.Blink    = &ldr_entry->DdagNode->Modules;
+    ldr_entry->DdagNode->Modules.Flink = &ldr_entry->NodeModuleLink;
+    ldr_entry->DdagNode->Modules.Blink = &ldr_entry->NodeModuleLink;
+    ldr_entry->DdagNode->State         = LdrModulesReadyToRun;
+    ldr_entry->DdagNode->LoadCount     = 1;
+
+    // set the entry point
+    ldr_entry->EntryPoint = RVA2VA(PVOID, base_address, nt->OptionalHeader.AddressOfEntryPoint);
+
+    return ldr_entry;
+}
+
+BOOL link_module(
+    IN PLOADED_PE_INFO peinfo,
+    IN PVOID base_address)
+{
+    PLDR_DATA_TABLE_ENTRY2 ldr_entry = NULL;
+    BOOL                   Success   = FALSE;
+
+    ldr_entry = create_ldr_entry(peinfo, base_address);
+    if (!ldr_entry)
+        goto Cleanup;
+
+    if (!link_ldr_entry(ldr_entry))
+        goto Cleanup;
+
+    Success = TRUE;
+
+Cleanup:
+    if (!Success && ldr_entry)
+        intFree(ldr_entry);
+
+    if (Success)
+        peinfo->ldr_entry = ldr_entry;
+
+    return Success;
 }

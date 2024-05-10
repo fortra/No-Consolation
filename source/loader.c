@@ -378,7 +378,7 @@ BOOL load_pe(
     }
 
     // Execute TLS callbacks
-    rva = ntnew->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress;
+    rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress;
     if (rva != 0)
     {
         DPRINT("Processing TLS directory");
@@ -446,12 +446,24 @@ BOOL load_pe(
     }
     else
     {
-        peinfo->EntryPoint = RVA2VA(PVOID, pe_base, ntnew->OptionalHeader.AddressOfEntryPoint);
+        peinfo->EntryPoint = RVA2VA(PVOID, pe_base, nt->OptionalHeader.AddressOfEntryPoint);
     }
 
     if (!SetCommandLineW(peinfo->cmdwline))
     {
         goto Cleanup;
+    }
+
+    if (peinfo->link_to_peb)
+    {
+        DPRINT("Linking module to the PEB");
+
+        if (!link_module(peinfo, pe_base))
+        {
+            DPRINT("Failed to link module to the PEB");
+            goto Cleanup;
+        }
+        peinfo->linked = TRUE;
     }
 
     peinfo->pe_base = pe_base;
@@ -469,6 +481,12 @@ Cleanup:
             peinfo->func_table = NULL;
         }
 #endif
+
+        if (peinfo->linked)
+        {
+            unlink_module(peinfo->ldr_entry);
+            peinfo->linked = FALSE;
+        }
 
         peinfo->pe_base = pe_base;
         peinfo->pe_size = 0;
@@ -567,35 +585,36 @@ BOOL IsReadable(
 BOOL SetCommandLineW(
     IN PCWSTR CommandLine)
 {
-    PIMAGE_DOS_HEADER     dos      = NULL;
-    PIMAGE_NT_HEADERS     nt       = NULL;
-    PIMAGE_SECTION_HEADER sh       = NULL;
-    DWORD                 i        = 0;
-    DWORD                 cnt      = 0;
-    PULONG_PTR            ds       = NULL;
-    HMODULE               m        = NULL;
-    ANSI_STRING           ansi     = { 0 };
-    PANSI_STRING          mbs      = NULL;
-    PUNICODE_STRING       wcs      = NULL;
-    PPEB                  peb      = NULL;
-    PPEB_LDR_DATA         ldr      = NULL;
-    PLDR_DATA_TABLE_ENTRY dte      = NULL;
-    CHAR                  **argv   = NULL;
-    WCHAR                 **wargv  = NULL;
-    p_acmdln_t            p_acmdln = NULL;
-    p_wcmdln_t            p_wcmdln = NULL;
-    CHAR                  sym[128] = { 0 };
-    PCHAR                 str      = NULL;
-    INT                   fptr     = 0;
-    INT                   atype    = 0;
-    PVOID                 addr     = NULL;
-    PVOID                 wcmd     = NULL;
-    PVOID                 acmd     = NULL;
+    PIMAGE_DOS_HEADER      dos      = NULL;
+    PIMAGE_NT_HEADERS      nt       = NULL;
+    PIMAGE_SECTION_HEADER  sh       = NULL;
+    DWORD                  i        = 0;
+    DWORD                  cnt      = 0;
+    PULONG_PTR             ds       = NULL;
+    HMODULE                m        = NULL;
+    ANSI_STRING            ansi     = { 0 };
+    PANSI_STRING           mbs      = NULL;
+    PUNICODE_STRING        wcs      = NULL;
+    PPEB2                  peb      = NULL;
+    PPEB_LDR_DATA2         ldr      = NULL;
+    PLDR_DATA_TABLE_ENTRY2 dte      = NULL;
+    CHAR                   **argv   = NULL;
+    WCHAR                  **wargv  = NULL;
+    p_acmdln_t             p_acmdln = NULL;
+    p_wcmdln_t             p_wcmdln = NULL;
+    CHAR                   sym[128] = { 0 };
+    PCHAR                  str      = NULL;
+    INT                    fptr     = 0;
+    INT                    atype    = 0;
+    PVOID                  addr     = NULL;
+    PVOID                  wcmd     = NULL;
+    PVOID                  acmd     = NULL;
 
     if (!CommandLine)
         return TRUE;
 
-    peb = (PPEB)NtCurrentTeb()->ProcessEnvironmentBlock;
+    peb = (PPEB2)READ_MEMLOC(PEB_OFFSET);
+    ldr = (PPEB_LDR_DATA2)peb->Ldr;
 
     m   = xGetLibAddress("KernelBase", TRUE, NULL);
     dos = (PIMAGE_DOS_HEADER)m;
@@ -644,12 +663,10 @@ BOOL SetCommandLineW(
         break;
     }
 
-    ldr = (PPEB_LDR_DATA)peb->Ldr;
-
     // for each DLL loaded
-    for (dte=(PLDR_DATA_TABLE_ENTRY)ldr->Reserved2[1];
+    for (dte=(PLDR_DATA_TABLE_ENTRY2)ldr->InLoadOrderModuleList.Flink;
          dte->DllBase != NULL;
-         dte=(PLDR_DATA_TABLE_ENTRY)dte->Reserved1[0])
+         dte=(PLDR_DATA_TABLE_ENTRY2)dte->InLoadOrderLinks.Flink)
     {
         // check for exported symbols and patch according to string type
         str = (PCHAR)"_acmdln;__argv;__p__acmdln;__p___argv;_wcmdln;__wargv;__p__wcmdln;__p___wargv\0";
@@ -692,7 +709,7 @@ BOOL SetCommandLineW(
                 DPRINT("Checking %s", sym);
                 if (IsReadable(argv) && IsHeapPtr(*argv))
                 {
-                    DPRINT("Setting %ls!%s \"%s\" to \"%s\"", dte->Reserved5[0], sym, *argv, ansi.Buffer);
+                    DPRINT("Setting %ls!%s \"%s\" to \"%s\"", dte->BaseDllName.Buffer, sym, *argv, ansi.Buffer);
                     *argv = ansi.Buffer;
                 }
             }
@@ -709,7 +726,7 @@ BOOL SetCommandLineW(
                 DPRINT("Checking %s", sym);
                 if (IsReadable(wargv) && IsHeapPtr(*wargv))
                 {
-                    DPRINT("Setting %ls!%s \"%ls\" to \"%ls\"", dte->Reserved5[0], sym, *wargv, wcs->Buffer);
+                    DPRINT("Setting %ls!%s \"%ls\" to \"%ls\"", dte->BaseDllName.Buffer, sym, *wargv, wcs->Buffer);
                     *wargv = wcs->Buffer;
                 }
             }

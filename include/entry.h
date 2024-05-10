@@ -76,5 +76,8 @@ typedef struct _LOADED_PE_INFO {
     PVOID        original_ucrtbase_stderr;
     HANDLE       original_console_handle;
     PVOID        func_table;
+    BOOL         link_to_peb;
+    BOOL         linked;
+    PVOID        ldr_entry;
 } LOADED_PE_INFO, * PLOADED_PE_INFO;
 

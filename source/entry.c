@@ -32,6 +32,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     BOOL            recovered_pe  = FALSE;
     LPSTR           username      = NULL;
     LPSTR           loadtime      = NULL;
+    BOOL            link_to_peb   = FALSE;
     PLIB_LOADED     libs_tmp      = NULL;
     PLIB_LOADED     libs_entry    = NULL;
     NTSTATUS        status        = STATUS_UNSUCCESSFUL;
@@ -62,6 +63,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     username      = username[0] ? username : NULL;
     loadtime      = BeaconDataExtract(&parser, NULL);
     loadtime      = loadtime[0] ? loadtime : NULL;
+    link_to_peb   = BeaconDataInt(&parser);
 
     peinfo = intAlloc(sizeof(LOADED_PE_INFO));
 
@@ -74,6 +76,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->nooutput      = nooutput;
     peinfo->alloc_console = alloc_console;
     peinfo->unload_libs   = unload_libs;
+    peinfo->link_to_peb   = link_to_peb;
 
     // save a reference to peinfo
     BeaconAddValue(NC_PE_INFO_KEY, peinfo);
@@ -206,6 +209,15 @@ Cleanup:
     if (peinfo && peinfo->func_table)
         remove_inverted_function_table_entry(peinfo->func_table);
 #endif
+
+    if (peinfo && peinfo->linked)
+        unlink_module(peinfo->ldr_entry);
+
+    if (peinfo && peinfo->ldr_entry)
+    {
+        memset(peinfo->ldr_entry, 0, sizeof(PLDR_DATA_TABLE_ENTRY2));
+        intFree(peinfo->ldr_entry);
+    }
 
     if (peinfo && peinfo->pe_base)
     {

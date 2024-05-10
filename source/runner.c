@@ -5,7 +5,8 @@ BOOL set_thread_context(
     IN HANDLE hThread,
     IN PVOID Rip,
     IN PVOID Param1,
-    IN PVOID Param2)
+    IN PVOID Param2,
+    IN PVOID Param3)
 {
     CONTEXT  threadCtx = { 0 };
     NTSTATUS status    = STATUS_UNSUCCESSFUL;
@@ -39,6 +40,12 @@ BOOL set_thread_context(
     CONTEXT_SET_IP( threadCtx, Rip );
     CONTEXT_SET_ARG1( threadCtx, Param1 );
     CONTEXT_SET_ARG2( threadCtx, Param2 );
+    CONTEXT_SET_ARG3( threadCtx, Param3 );
+
+#ifdef _M_IX86
+    // on x86, some DLLs crash at RtlExitUserThread if we don't add some extra space
+    CONTEXT_ADD_STACK_SPACE( threadCtx, sizeof(PVOID) * 5 );
+#endif
 
     /*
      * for DLLs, the return address is usually NULL
@@ -87,14 +94,14 @@ BOOL prepare_thread(
             {
                 if (peinfo->use_unicode)
                 {
-                    if (!set_thread_context(peinfo->hThread, peinfo->DllParam, (PVOID)peinfo->cmdwline, NULL))
+                    if (!set_thread_context(peinfo->hThread, peinfo->DllParam, (PVOID)peinfo->cmdwline, NULL, NULL))
                     {
                         return FALSE;
                     }
                 }
                 else
                 {
-                    if (!set_thread_context(peinfo->hThread, peinfo->DllParam, (PVOID)peinfo->cmdline, NULL))
+                    if (!set_thread_context(peinfo->hThread, peinfo->DllParam, (PVOID)peinfo->cmdline, NULL, NULL))
                     {
                         return FALSE;
                     }
@@ -102,7 +109,7 @@ BOOL prepare_thread(
             }
             else
             {
-                if (!set_thread_context(peinfo->hThread, peinfo->DllParam, NULL, NULL))
+                if (!set_thread_context(peinfo->hThread, peinfo->DllParam, NULL, NULL, NULL))
                 {
                     return FALSE;
                 }
@@ -112,7 +119,7 @@ BOOL prepare_thread(
         {
             DPRINT("Invoking DllMain at 0x%p", peinfo->DllMain);
 
-            if (!set_thread_context(peinfo->hThread, peinfo->DllMain, (PVOID)DLL_PROCESS_ATTACH, NULL))
+            if (!set_thread_context(peinfo->hThread, peinfo->DllMain, peinfo->pe_base, (PVOID)DLL_PROCESS_ATTACH, NULL))
             {
                 return FALSE;
             }
@@ -122,7 +129,7 @@ BOOL prepare_thread(
     {
         DPRINT("Executing entrypoint of PE: 0x%p", peinfo->EntryPoint);
 
-        if (!set_thread_context(peinfo->hThread, peinfo->EntryPoint, NULL, NULL))
+        if (!set_thread_context(peinfo->hThread, peinfo->EntryPoint, NULL, NULL, NULL))
         {
             return FALSE;
         }
@@ -292,6 +299,11 @@ BOOL run_pe(
         return FALSE;
     }
 
+    if (!read_output(peinfo, &aborted))
+    {
+        return FALSE;
+    }
+
     if (peinfo->is_dll && !aborted)
     {
         /*
@@ -304,11 +316,6 @@ BOOL run_pe(
 
         DllMain = peinfo->DllMain;
         DllMain(peinfo->pe_base, DLL_PROCESS_DETACH, NULL);
-    }
-
-    if (!read_output(peinfo, &aborted))
-    {
-        return FALSE;
     }
 
     if (aborted)

@@ -770,7 +770,8 @@ BOOL insert_inverted_function_table_entry(
     {
         if (ift->CurrentSize > 1)
         {
-            fte = &ift->TableEntry[0];
+            // ntdll is always at 0, so we start at 1
+            fte = &ift->TableEntry[1];
             do
             {
                 if (base_address < fte->FunctionTable)
@@ -822,7 +823,7 @@ BOOL remove_inverted_function_table_entry(
     if (!ift)
         goto Cleanup;
 
-    for (DWORD i = 0; i < ift->CurrentSize; ++i)
+    for (DWORD i = 1; i < ift->CurrentSize; ++i)
     {
         fte = &ift->TableEntry[i];
 

@@ -9,7 +9,7 @@ This is a Beacon Object File (BOF) that executes unmanaged PEs inline and retrie
 - Supports EXEs and DLLs
 - Does not create new processes
 - Saves binaries in memory
-- Supports C++ exceptions (experimental)
+- Supports C++ exceptions (x64 only)
 
 ## Usage
 ```

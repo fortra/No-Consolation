@@ -307,7 +307,7 @@ PRTL_RB_TREE find_module_base_address_index(VOID)
 
         for (INT i = 0; i < nt->FileHeader.NumberOfSections; i++)
         {
-            if (!strcmp(".data", (LPCSTR)sh->Name))
+            if (!strncmp(".data", (LPCSTR)sh->Name, 6))
             {
                 stBegin = RVA2VA(SIZE_T, ldr_entry->DllBase, sh->VirtualAddress);
                 dwLen   = sh->Misc.VirtualSize;
@@ -578,9 +578,9 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
         return NULL;
     }
 
-    // you might want to change these
-    RtlInitUnicodeString(&full_dll_name, L"C:\\Windows\\System32\\NoConsolation.dll");
-    RtlInitUnicodeString(&base_dll_name, L"NoConsolation.dll");
+    // set the PE name and path
+    RtlInitUnicodeString(&full_dll_name, peinfo->pe_wpath);
+    RtlInitUnicodeString(&base_dll_name, peinfo->pe_wname);
 
     ldr_entry = intAlloc(sizeof(LDR_DATA_TABLE_ENTRY2));
     if (!ldr_entry)

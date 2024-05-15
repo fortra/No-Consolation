@@ -13,6 +13,8 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     datap           parser        = { 0 };
     int             pe_length     = 0;
     LPSTR           pe_name       = NULL;
+    LPWSTR          pe_wname      = NULL;
+    LPWSTR          pe_wpath      = NULL;
     PVOID           pe_bytes      = 0;
     LPSTR           pe_path       = 0;
     BOOL            local         = FALSE;
@@ -39,8 +41,12 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     PLOADED_PE_INFO peinfo        = NULL;
 
     BeaconDataParse(&parser, Buffer, Length);
+    pe_wname      = (LPWSTR)BeaconDataExtract(&parser, NULL);
+    pe_wname      = pe_wname[0] ? pe_wname : NULL;
     pe_name       = BeaconDataExtract(&parser, NULL);
     pe_name       = pe_name[0] ? pe_name : NULL;
+    pe_wpath      = (LPWSTR)BeaconDataExtract(&parser, NULL);
+    pe_wpath      = pe_wpath[0] ? pe_wpath : NULL;
     pe_bytes      = BeaconDataExtract(&parser, &pe_length);
     pe_path       = BeaconDataExtract(&parser, NULL);
     pe_path       = pe_path[0] ? pe_path : NULL;
@@ -67,6 +73,8 @@ int go(IN PCHAR Buffer, IN ULONG Length)
 
     peinfo = intAlloc(sizeof(LOADED_PE_INFO));
 
+    wcscpy(peinfo->pe_wname, pe_wname ? pe_wname : L"NoConsolation.dll");
+    wcscpy(peinfo->pe_wpath, pe_wpath ? pe_wpath : L"C:\\Windows\\System32\\NoConsolation.dll");
     peinfo->timeout       = timeout;
     peinfo->headers       = headers;
     peinfo->method        = method[0] ? method : NULL;

@@ -1,13 +1,15 @@
 
 alias noconsolation
 {
-    local('$bid $barch $PE $args $path $path_set $name_set $pebytes $x $matchfound $pe_id $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs $dont_save $list_pes $unload_pe $link_to_peb');
+    local('$bid $barch $PE $args $path $path_set $name_set $pebytes $x $matchfound $pe_id $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs $dont_save $list_pes $unload_pe $link_to_peb $pepath $pename');
 
     $bid = $1;
     $pe_id = 0;
     $local = 0;
     $i = 1;
     $path = '';
+    $pename = '';
+    $pepath = '';
     $path_set = 0;
     $name_set = 0;
     $pebytes = '';
@@ -187,6 +189,7 @@ alias noconsolation
         if ($local == 0)
         {
             $pename = split("/", $path, 50)[-1];
+            $pepath = "C:\\Windows\\System32\\" . $pename;
 
             $handle = openf($path);
             $pebytes = readb($handle, -1);
@@ -201,6 +204,7 @@ alias noconsolation
         else
         {
             $pename = split('\\\\', $path, 50)[-1];
+            $pepath = $path;
         }
     }
 
@@ -217,7 +221,7 @@ alias noconsolation
         }
     }
 
-    runpe($bid, $pename, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs, $dont_save, $list_pes, $unload_pe, mynick(), tstamp(ticks()), $link_to_peb);
+    runpe($bid, $pename, $pepath, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs, $dont_save, $list_pes, $unload_pe, mynick(), tstamp(ticks()), $link_to_peb);
 }
 
 sub runpe{
@@ -233,7 +237,7 @@ sub runpe{
     }
 
     # Pack the arguments
-    $args = bof_pack($1, "zbziiiZzziiiiiiizzzi", $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20);
+    $args = bof_pack($1, "ZzZbziiiZzziiiiiiizzzi", $2 $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21);
 
     # Execute BOF
     beacon_inline_execute($1, $data, "go", $args);

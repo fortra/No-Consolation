@@ -30,6 +30,8 @@ typedef struct _LIB_LOADED {
 } LIB_LOADED, * PLIB_LOADED;
 
 typedef struct _LOADED_PE_INFO {
+    WCHAR        pe_wname[MAX_PATH];
+    WCHAR        pe_wpath[MAX_PATH];
     PVOID        pe_base;
     SIZE_T       pe_size;
     LPWSTR       cmdwline;

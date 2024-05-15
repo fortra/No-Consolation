@@ -625,7 +625,7 @@ BOOL protect_inverted_function_table(
     pSection = IMAGE_FIRST_SECTION(nt);
     for (INT i = 0; i < nt->FileHeader.NumberOfSections; i++)
     {
-        if (!strcmp(".mrdata", (LPCSTR)pSection->Name))
+        if (!strncmp(".mrdata", (LPCSTR)pSection->Name, 8))
         {
             stBegin = RVA2VA(PVOID, dos, pSection->VirtualAddress);
             len = pSection->Misc.VirtualSize;
@@ -686,7 +686,7 @@ PVOID find_inverted_function_table()
     pSection = IMAGE_FIRST_SECTION(nt);
     for (INT i = 0; i < nt->FileHeader.NumberOfSections; i++)
     {
-        if (!strcmp(".mrdata", (LPCSTR)pSection->Name))
+        if (!strncmp(".mrdata", (LPCSTR)pSection->Name, 8))
         {
             stBegin = RVA2VA(PVOID, dos, pSection->VirtualAddress);
             dwLen = pSection->Misc.VirtualSize;

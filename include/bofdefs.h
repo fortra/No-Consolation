@@ -437,12 +437,12 @@ WINBASEAPI NTSTATUS NTAPI   NTDLL$NtQueryVirtualMemory(HANDLE ProcessHandle, PVO
 WINBASEAPI NTSTATUS NTAPI   NTDLL$NtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList);
 WINBASEAPI SIZE_T NTSYSAPI  NTDLL$RtlCompareMemory(VOID *Source1, VOID *Source2, SIZE_T Length);
 
-WINBASEAPI  int  __cdecl MSVCRT$_stricmp(const char *string1,const char *string2);
-WINBASEAPI void  __cdecl MSVCRT$memset(void *dest, int c, size_t count);
-WINBASEAPI PVOID __cdecl MSVCRT$memcpy(void * __restrict__ _Dst,const void * __restrict__ _Src,size_t _MaxCount);
-WINBASEAPI int   __cdecl MSVCRT$strncmp(const char *s1, const char *s2, size_t n);
-WINBASEAPI int   __cdecl MSVCRT$strcmp(const char *s1, const char *s2);
-WINBASEAPI int   __cdecl MSVCRT$wcscmp(const wchar_t *string1, const wchar_t *string2);
+WINBASEAPI WCHAR* __cdecl MSVCRT$wcscpy(WCHAR *strDestination,const WCHAR *strSource);
+WINBASEAPI  int   __cdecl MSVCRT$_stricmp(const char *string1,const char *string2);
+WINBASEAPI void   __cdecl MSVCRT$memset(void *dest, int c, size_t count);
+WINBASEAPI PVOID  __cdecl MSVCRT$memcpy(void * __restrict__ _Dst,const void * __restrict__ _Src,size_t _MaxCount);
+WINBASEAPI int    __cdecl MSVCRT$strncmp(const char *s1, const char *s2, size_t n);
+WINBASEAPI int    __cdecl MSVCRT$wcscmp(const wchar_t *string1, const wchar_t *string2);
 
 WINBASEAPI HANDLE WINAPI KERNEL32$GetProcessHeap(VOID);
 WINBASEAPI void * WINAPI KERNEL32$HeapAlloc (HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes);
@@ -472,12 +472,12 @@ WINBASEAPI BOOL   WINAPI KERNEL32$FreeLibrary(HANDLE hLibModule);
 #define NtCreateThreadEx             NTDLL$NtCreateThreadEx
 #define RtlCompareMemory             NTDLL$RtlCompareMemory
 
+#define wcscpy                       MSVCRT$wcscpy
 #define _stricmp                     MSVCRT$_stricmp
 #define memset                       MSVCRT$memset
 #define memcpy                       MSVCRT$memcpy
 #define strncmp                      MSVCRT$strncmp
-#define strcmp                       MSVCRT$strcmp
-#define wcscmp                      MSVCRT$wcscmp
+#define wcscmp                       MSVCRT$wcscmp
 
 #define GetProcessHeap               KERNEL32$GetProcessHeap
 #define HeapAlloc                    KERNEL32$HeapAlloc

@@ -1,5 +1,12 @@
 #pragma once
 
+BOOL find_pattern(
+    IN PVOID dwAddress,
+    IN ULONG32 dwLen,
+    IN PBYTE bMask,
+    IN PCHAR szMask,
+    OUT PVOID* pattern_addr);
+
 BOOL is_pe(
     IN HMODULE hLibrary);
 

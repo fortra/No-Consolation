@@ -1,5 +1,40 @@
 #include "utils.h"
 
+BOOL compare_bytes(
+    IN PBYTE pData,
+    IN PBYTE bMask,
+    IN PCHAR szMask)
+{
+    for (; *szMask; ++szMask, ++pData, ++bMask)
+    {
+        if (*szMask == 'x' && *pData != *bMask)
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+BOOL find_pattern(
+    IN PVOID dwAddress,
+    IN ULONG32 dwLen,
+    IN PBYTE bMask,
+    IN PCHAR szMask,
+    OUT PVOID* pattern_addr)
+{
+    PVOID current_address = NULL;
+    for (ULONG32 i = 0; i < dwLen; i++)
+    {
+        current_address = RVA2VA(PVOID, dwAddress, i);
+        if (compare_bytes(current_address, bMask, szMask))
+        {
+            *pattern_addr = current_address;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 // check if bytes are from a windows PE
 BOOL is_pe(
     IN HMODULE hLibrary)

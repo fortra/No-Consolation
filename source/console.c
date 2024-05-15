@@ -258,36 +258,78 @@ BOOL redirect_std_out_err_for_msvc(
     return TRUE;
 }
 
-/*
- * In order to find the address of 'ConsoleConnectionState', we parse BaseGetConsoleReference
- * which is a very short function that references a field in that structure
- */
-PVOID get_address_of_console_connection_state(VOID)
+PVOID parse_free_console(
+    IN PBYTE Addr)
+{
+    UINT32 Offset                 = 0;
+#ifdef _WIN64
+    PVOID  Rip                    = NULL;
+#endif
+    PVOID  ConsoleConnectionState = NULL;
+    PBYTE  bytes_to_match         = (PBYTE)"\x80\x3d";
+
+    if (!Addr)
+    {
+        api_not_found("FreeConsole");
+        return NULL;
+    }
+
+    /*
+     * KERNELBASE$FreeConsole:
+     *  ...
+     *  80 3d a2        cmp        byte ptr [rip+0x1992a2], 0x0
+     *  92 19 00 00
+     */
+
+    if (!find_pattern(Addr, 0x30, bytes_to_match, "xx", (PVOID*)&Addr))
+    {
+        DPRINT("Pattern not found in FreeConsole");
+        return NULL;
+    }
+
+#ifdef _WIN64
+    // address of the next instruction
+    Rip  = RVA2VA(PVOID, Addr, 7);
+#endif
+
+    // skip over 0x80 0x3d
+    Addr++;
+    Addr++;
+
+    // read the offset
+    Offset = *((PUINT32)Addr);
+
+#ifdef _WIN64
+    // the reference is RIP-releative
+    Addr = RVA2VA(PVOID, Rip, Offset);
+#else
+    Addr = (PVOID)Offset;
+#endif
+
+    // we have a reference to IsConnected, get the address of the base structure
+    ConsoleConnectionState = CONTAINING_RECORD(Addr, CONSOLE_CONNECTION_STATE, IsConnected);
+    DPRINT("ConsoleConnectionState: 0x%p", ConsoleConnectionState);
+
+    return ConsoleConnectionState;
+}
+
+PVOID parse_base_get_console_reference(
+    IN PBYTE Addr)
 {
 #ifdef _WIN64
-    UINT32                Offset                 = 0;
+    UINT32 Offset                 = 0;
 #endif
-    PBYTE                 Addr                   = NULL;
-    PVOID                 Rip                    = NULL;
-    PVOID                 ConsoleReference       = NULL;
-    PVOID                 ConsoleConnectionState = NULL;
-    PVOID                 KernelBase             = NULL;
-    PIMAGE_DOS_HEADER     dos                    = NULL;
-    PIMAGE_NT_HEADERS     nt                     = NULL;
-    PIMAGE_SECTION_HEADER sh                     = NULL;
-    LPSTR                 data                   = NULL;
-    PVOID                 DataBase               = NULL;
-    UINT32                DataSize               = 0;
+    PVOID  Rip                    = NULL;
+    PVOID  ConsoleReference       = NULL;
+    PVOID  ConsoleConnectionState = NULL;
 
-    HANDLE (WINAPI *BaseGetConsoleReference) (void) = xGetProcAddress(xGetLibAddress("KernelBase", TRUE, NULL), "BaseGetConsoleReference", 0);
-
-    // base address of BaseGetConsoleReference
-    Addr = (PBYTE)BaseGetConsoleReference;
     if (!Addr)
     {
         api_not_found("BaseGetConsoleReference");
         return NULL;
     }
+
+    HANDLE (WINAPI *BaseGetConsoleReference) (void) = (PVOID)Addr;
 
 #ifdef _WIN64
     /*
@@ -362,9 +404,57 @@ PVOID get_address_of_console_connection_state(VOID)
     ConsoleReference = (PVOID)*((PUINT32)Addr);
 #endif
 
+    // make sure we got the address of the ConsoleReference right
+    if (BaseGetConsoleReference() != *(PHANDLE)ConsoleReference)
+    {
+        DPRINT_ERR("failed to parse BaseGetConsoleReference");
+        return NULL;
+    }
+
     // get the base of the struct from the address of the attribute
     ConsoleConnectionState = CONTAINING_RECORD(ConsoleReference, CONSOLE_CONNECTION_STATE, ConsoleReference);
     DPRINT("ConsoleConnectionState: 0x%p", ConsoleConnectionState);
+
+    return ConsoleConnectionState;
+}
+
+/*
+ * In order to find the address of 'ConsoleConnectionState', we parse BaseGetConsoleReference
+ * which is a very short function that references a field in that structure
+ */
+PVOID get_address_of_console_connection_state(VOID)
+{
+    PBYTE                 Addr                   = NULL;
+    PVOID                 ConsoleConnectionState = NULL;
+    PVOID                 KernelBase             = NULL;
+    PIMAGE_DOS_HEADER     dos                    = NULL;
+    PIMAGE_NT_HEADERS     nt                     = NULL;
+    PIMAGE_SECTION_HEADER sh                     = NULL;
+    LPSTR                 data                   = NULL;
+    PVOID                 DataBase               = NULL;
+    UINT32                DataSize               = 0;
+
+    /*
+     * If exported, we parse kernelbase!BaseGetConsoleReference.
+     * If not, we parse kernelbase!FreeConsole which is a bit more complex
+     */
+    if (!ConsoleConnectionState)
+    {
+        Addr = xGetProcAddress(xGetLibAddress("KernelBase", TRUE, NULL), "BaseGetConsoleReference", 0);
+        ConsoleConnectionState = parse_base_get_console_reference(Addr);
+    }
+
+    if (!ConsoleConnectionState)
+    {
+        Addr = xGetProcAddress(xGetLibAddress("KernelBase", TRUE, NULL), "FreeConsole", 0);
+        ConsoleConnectionState = parse_free_console(Addr);
+    }
+
+    if (!ConsoleConnectionState)
+    {
+        DPRINT("Failed to get address of ConsoleConnectionState");
+        return NULL;
+    }
 
     /*
      * as a sanity check, we verify that the resulting pointer is on the .data section of KernalBase
@@ -403,13 +493,6 @@ PVOID get_address_of_console_connection_state(VOID)
         (ULONG_PTR)DataBase + DataSize < (ULONG_PTR)ConsoleConnectionState)
     {
         DPRINT_ERR("ConsoleConnectionState is not in the .data section");
-        return NULL;
-    }
-
-    // lastly, make sure we got the address of the ConsoleReference right
-    if (BaseGetConsoleReference() != *(PHANDLE)ConsoleReference)
-    {
-        DPRINT_ERR("failed to parse BaseGetConsoleReference");
         return NULL;
     }
 

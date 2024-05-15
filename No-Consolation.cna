@@ -24,7 +24,7 @@ alias noconsolation
     $dont_save = 0;
     $list_pes = 0;
     $unload_pe = '';
-    $link_to_peb = 1;
+    $link_to_peb = 0;
 
     # make sure the beacon is not WoW64
     $is64 = binfo($bid, "is64");

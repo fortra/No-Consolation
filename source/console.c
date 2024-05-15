@@ -335,9 +335,6 @@ PVOID get_address_of_console_connection_state(VOID)
 
     // the reference is RIP-releative
     ConsoleReference = RVA2VA(PVOID, Rip, Offset);
-    // get the base of the struct from the address of the attribute
-    ConsoleConnectionState = RVA2VA(PVOID, ConsoleReference, -0x10);
-
 #else
     /*
      * KERNELBASE$BaseGetConsoleReference:
@@ -363,10 +360,10 @@ PVOID get_address_of_console_connection_state(VOID)
     }
 
     ConsoleReference = (PVOID)*((PUINT32)Addr);
-    // get the base of the struct from the address of the attribute
-    ConsoleConnectionState = RVA2VA(PVOID, ConsoleReference, -0x8);
 #endif
 
+    // get the base of the struct from the address of the attribute
+    ConsoleConnectionState = CONTAINING_RECORD(ConsoleReference, CONSOLE_CONNECTION_STATE, ConsoleReference);
     DPRINT("ConsoleConnectionState: 0x%p", ConsoleConnectionState);
 
     /*

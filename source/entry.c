@@ -35,6 +35,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     LPSTR           username      = NULL;
     LPSTR           loadtime      = NULL;
     BOOL            link_to_peb   = FALSE;
+    BOOL            dont_unload   = FALSE;
     PLIB_LOADED     libs_tmp      = NULL;
     PLIB_LOADED     libs_entry    = NULL;
     NTSTATUS        status        = STATUS_UNSUCCESSFUL;
@@ -70,6 +71,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     loadtime      = BeaconDataExtract(&parser, NULL);
     loadtime      = loadtime[0] ? loadtime : NULL;
     link_to_peb   = BeaconDataInt(&parser);
+    dont_unload   = BeaconDataInt(&parser);
 
     peinfo = intAlloc(sizeof(LOADED_PE_INFO));
 
@@ -213,28 +215,31 @@ Cleanup:
         BeaconRemoveValue(NC_HANDLE_INFO_KEY);
     }
 
+    if (!dont_unload)
+    {
 #ifdef _WIN64
-    if (peinfo && peinfo->func_table)
-        remove_inverted_function_table_entry(peinfo->func_table);
+        if (peinfo && peinfo->func_table)
+            remove_inverted_function_table_entry(peinfo->func_table);
 #endif
 
-    if (peinfo && peinfo->linked)
-        unlink_module(peinfo->ldr_entry);
+        if (peinfo && peinfo->linked)
+            unlink_module(peinfo->ldr_entry);
 
-    if (peinfo && peinfo->ldr_entry)
-    {
-        memset(peinfo->ldr_entry, 0, sizeof(PLDR_DATA_TABLE_ENTRY2));
-        intFree(peinfo->ldr_entry);
-    }
-
-    if (peinfo && peinfo->pe_base)
-    {
-        peinfo->pe_size = 0;
-        status = NtFreeVirtualMemory(NtCurrentProcess(), &peinfo->pe_base, &peinfo->pe_size, MEM_RELEASE);
-        if (!NT_SUCCESS(status))
+        if (peinfo && peinfo->ldr_entry)
         {
-            syscall_failed("NtFreeVirtualMemory", status);
-            PRINT_ERR("Failed to cleanup PE from memory");
+            memset(peinfo->ldr_entry, 0, sizeof(PLDR_DATA_TABLE_ENTRY2));
+            intFree(peinfo->ldr_entry);
+        }
+
+        if (peinfo && peinfo->pe_base)
+        {
+            peinfo->pe_size = 0;
+            status = NtFreeVirtualMemory(NtCurrentProcess(), &peinfo->pe_base, &peinfo->pe_size, MEM_RELEASE);
+            if (!NT_SUCCESS(status))
+            {
+                syscall_failed("NtFreeVirtualMemory", status);
+                PRINT_ERR("Failed to cleanup PE from memory");
+            }
         }
     }
 

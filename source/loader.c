@@ -408,7 +408,12 @@ BOOL load_pe(
     // find the entry point of the PE
     if (peinfo->is_dll)
     {
-        peinfo->DllMain = RVA2VA(PVOID, pe_base, nt->OptionalHeader.AddressOfEntryPoint);
+        // some DLLs don't have an entry point
+        if (nt->OptionalHeader.AddressOfEntryPoint)
+            peinfo->DllMain = RVA2VA(PVOID, pe_base, nt->OptionalHeader.AddressOfEntryPoint);
+        else
+            peinfo->DllMain = NULL;
+
         if (peinfo->method)
         {
             DPRINT("Resolving address of %s", peinfo->method);

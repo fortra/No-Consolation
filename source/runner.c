@@ -53,7 +53,6 @@ BOOL set_thread_context(
      */
     if (CONTEXT_GET_RET( threadCtx ) == NULL)
     {
-        DPRINT("Setting the return address to RtlExitUserThread");
         Ret = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
         CONTEXT_SET_RET( threadCtx, Ret);
     }
@@ -77,18 +76,21 @@ BOOL prepare_thread(
     {
         if (peinfo->method)
         {
-            /*
-             * The operator specified a method to run.
-             * Before we run it, we must first call DllMain,
-             * we do that with our current thread (meaning, no hwbp)
-             */
+            if (peinfo->DllMain)
+            {
+                /*
+                 * The operator specified a method to run.
+                 * Before we run it, we must first call DllMain,
+                 * we do that with our current thread (meaning, no hwbp)
+                 */
 
-            DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
+                DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
 
-            DllMain = peinfo->DllMain;
-            DllMain(peinfo->pe_base, DLL_PROCESS_ATTACH, NULL);
+                DllMain = peinfo->DllMain;
+                DllMain(peinfo->pe_base, DLL_PROCESS_ATTACH, NULL);
+            }
 
-            DPRINT("Invoking %s at 0x%p", peinfo->method, peinfo->DllParam);
+            DPRINT("Executing %ls!%s", peinfo->pe_wname, peinfo->method);
 
             if (peinfo->cmdwline || peinfo->cmdline)
             {
@@ -117,17 +119,20 @@ BOOL prepare_thread(
         }
         else
         {
-            DPRINT("Invoking DllMain at 0x%p", peinfo->DllMain);
-
-            if (!set_thread_context(peinfo->hThread, peinfo->DllMain, peinfo->pe_base, (PVOID)DLL_PROCESS_ATTACH, NULL))
+            if (peinfo->DllMain)
             {
-                return FALSE;
+                DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
+
+                if (!set_thread_context(peinfo->hThread, peinfo->DllMain, peinfo->pe_base, (PVOID)DLL_PROCESS_ATTACH, NULL))
+                {
+                    return FALSE;
+                }
             }
         }
     }
     else
     {
-        DPRINT("Executing entrypoint of PE: 0x%p", peinfo->EntryPoint);
+        DPRINT("Executing %ls", peinfo->pe_wname);
 
         if (!set_thread_context(peinfo->hThread, peinfo->EntryPoint, NULL, NULL, NULL))
         {
@@ -289,6 +294,16 @@ BOOL run_pe(
     BOOL      aborted = FALSE;
     DllMain_t DllMain = NULL;
 
+    /*
+     * If we are supposed to run DllMain,
+     * make sure the DLL has an entrypoint
+     */
+    if (peinfo->is_dll && !peinfo->method && !peinfo->DllMain)
+    {
+        PRINT("The DLL %ls does not have an entrypoint", peinfo->pe_wname);
+        return TRUE;
+    }
+
     if (!prepare_thread(peinfo))
     {
         return FALSE;
@@ -304,7 +319,7 @@ BOOL run_pe(
         return FALSE;
     }
 
-    if (peinfo->is_dll && !aborted)
+    if (peinfo->is_dll && peinfo->DllMain && !aborted)
     {
         /*
          * The DLL's thread has exited,

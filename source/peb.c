@@ -621,11 +621,7 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
     ldr_entry->BaseDllName           = base_dll_name;
     ldr_entry->FullDllName           = full_dll_name;
     ldr_entry->ObsoleteLoadCount     = 1;
-    ldr_entry->Flags                 = LDRP_IMAGE_DLL | LDRP_ENTRY_INSERTED | LDRP_ENTRY_PROCESSED | LDRP_PROCESS_ATTACH_CALLED;
-
-    // avoid ntdll!LdrpCallInitRoutine from calling DllMain with DLL_THREAD_DETACH on EXEs
-    if (!peinfo->is_dll)
-        ldr_entry->Flags |= LDRP_DONT_CALL_FOR_THREADS;
+    ldr_entry->Flags                 = LDRP_IMAGE_DLL | LDRP_ENTRY_INSERTED | LDRP_ENTRY_PROCESSED | LDRP_PROCESS_ATTACH_CALLED | LDRP_DONT_CALL_FOR_THREADS;
 
     // set the correct values in the Ddag node struct
     ldr_entry->DdagNode = intAlloc(sizeof(LDR_DDAG_NODE));

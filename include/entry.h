@@ -81,5 +81,6 @@ typedef struct _LOADED_PE_INFO {
     BOOL         link_to_peb;
     BOOL         linked;
     PVOID        ldr_entry;
+    BOOL         dont_unload;
 } LOADED_PE_INFO, * PLOADED_PE_INFO;
 

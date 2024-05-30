@@ -319,7 +319,7 @@ BOOL run_pe(
         return FALSE;
     }
 
-    if (peinfo->is_dll && peinfo->DllMain && !aborted)
+    if (peinfo->is_dll && peinfo->DllMain && !aborted && !peinfo->dont_unload)
     {
         /*
          * The DLL's thread has exited,

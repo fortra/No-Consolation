@@ -87,6 +87,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->alloc_console = alloc_console;
     peinfo->unload_libs   = unload_libs;
     peinfo->link_to_peb   = link_to_peb;
+    peinfo->dont_unload   = dont_unload;
 
     // save a reference to peinfo
     BeaconAddValue(NC_PE_INFO_KEY, peinfo);

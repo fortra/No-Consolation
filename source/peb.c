@@ -457,8 +457,7 @@ PLIST_ENTRY find_hash_table(VOID)
 
             pList = (PLIST_ENTRY)(
                 (size_t)pCurrentEntry->HashLinks.Flink -
-                ulHash *
-                sizeof(LIST_ENTRY));
+                ulHash * sizeof(LIST_ENTRY));
 
             break;
         }
@@ -564,10 +563,10 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
     IN PLOADED_PE_INFO peinfo,
     IN PVOID base_address)
 {
-    PIMAGE_NT_HEADERS      nt            = NULL;
-    UNICODE_STRING         full_dll_name = { 0 };
-    UNICODE_STRING         base_dll_name = { 0 };
-    PLDR_DATA_TABLE_ENTRY2 ldr_entry     = NULL;
+    PIMAGE_NT_HEADERS      nt        = NULL;
+    PLDR_DATA_TABLE_ENTRY2 ldr_entry = NULL;
+    LPWSTR                 pe_wname  = NULL;
+    LPWSTR                 pe_wpath  = NULL;
 
     nt = RVA2VA(PIMAGE_NT_HEADERS, base_address, ((PIMAGE_DOS_HEADER)base_address)->e_lfanew);
 
@@ -578,9 +577,12 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
         return NULL;
     }
 
-    // set the PE name and path
-    RtlInitUnicodeString(&full_dll_name, peinfo->pe_wpath);
-    RtlInitUnicodeString(&base_dll_name, peinfo->pe_wname);
+    NTSTATUS ( WINAPI *NtQuerySystemTime ) ( PLARGE_INTEGER ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "NtQuerySystemTime", 0);
+    if (!NtQuerySystemTime)
+    {
+        api_not_found("NtQuerySystemTime");
+        return NULL;
+    }
 
     ldr_entry = intAlloc(sizeof(LDR_DATA_TABLE_ENTRY2));
     if (!ldr_entry)
@@ -589,27 +591,19 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
         return NULL;
     }
 
-    NTSTATUS ( WINAPI *NtQuerySystemTime ) ( PLARGE_INTEGER ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "NtQuerySystemTime", 0);
-    if (!NtQuerySystemTime)
-    {
-        api_not_found("NtQuerySystemTime");
-        return NULL;
-    }
+    pe_wname = intAlloc(sizeof(WCHAR) * MAX_PATH);
+    wcscpy(pe_wname, peinfo->pe_wname);
+    pe_wpath = intAlloc(sizeof(WCHAR) * MAX_PATH);
+    wcscpy(pe_wpath, peinfo->pe_wpath);
 
     // start setting the values in the entry
     NtQuerySystemTime(&ldr_entry->LoadTime);
 
-    // do the obvious ones
     ldr_entry->ReferenceCount        = 1;
     ldr_entry->LoadReason            = LoadReasonDynamicLoad;
     ldr_entry->OriginalBase          = nt->OptionalHeader.ImageBase;
-
-    // set the hash value
-    ldr_entry->BaseNameHashValue = ldr_hash_entry(base_dll_name, FALSE);
-
-    // and the rest
     ldr_entry->ImageDll              = TRUE;
-    ldr_entry->LoadNotificationsSent = TRUE; // lol
+    ldr_entry->LoadNotificationsSent = TRUE;
     ldr_entry->EntryProcessed        = TRUE;
     ldr_entry->InLegacyLists         = TRUE;
     ldr_entry->InIndexes             = TRUE;
@@ -618,10 +612,12 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
     ldr_entry->DllBase               = base_address;
     ldr_entry->SizeOfImage           = nt->OptionalHeader.SizeOfImage;
     ldr_entry->TimeDateStamp         = nt->FileHeader.TimeDateStamp;
-    ldr_entry->BaseDllName           = base_dll_name;
-    ldr_entry->FullDllName           = full_dll_name;
+    RtlInitUnicodeString(&ldr_entry->BaseDllName, pe_wname);
+    RtlInitUnicodeString(&ldr_entry->FullDllName, pe_wpath);
     ldr_entry->ObsoleteLoadCount     = 1;
     ldr_entry->Flags                 = LDRP_IMAGE_DLL | LDRP_ENTRY_INSERTED | LDRP_ENTRY_PROCESSED | LDRP_PROCESS_ATTACH_CALLED | LDRP_DONT_CALL_FOR_THREADS;
+    ldr_entry->BaseNameHashValue     = ldr_hash_entry(ldr_entry->BaseDllName, FALSE);
+    ldr_entry->EntryPoint            = RVA2VA(PVOID, base_address, nt->OptionalHeader.AddressOfEntryPoint);
 
     // set the correct values in the Ddag node struct
     ldr_entry->DdagNode = intAlloc(sizeof(LDR_DDAG_NODE));
@@ -638,9 +634,6 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
     ldr_entry->DdagNode->Modules.Blink = &ldr_entry->NodeModuleLink;
     ldr_entry->DdagNode->State         = LdrModulesReadyToRun;
     ldr_entry->DdagNode->LoadCount     = 1;
-
-    // set the entry point
-    ldr_entry->EntryPoint = RVA2VA(PVOID, base_address, nt->OptionalHeader.AddressOfEntryPoint);
 
     return ldr_entry;
 }

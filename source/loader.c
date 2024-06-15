@@ -240,16 +240,19 @@ BOOL load_pe(
                         DPRINT("IAT hooking %s!%s with ntdll!RtlExitUserThread", name, ibn->Name);
                         ft->u1.Function = (ULONG_PTR)xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
                     }
-                    else if (!_stricmp(ibn->Name, "GetProcAddress"))
+                    // some PEs search for exit-related APIs using GetProcAddress
+                    else if (!peinfo->dont_unload && !_stricmp(ibn->Name, "GetProcAddress"))
                     {
                         DPRINT("IAT hooking %s!%s with my_get_proc_address", name, ibn->Name);
                         ft->u1.Function = (ULONG_PTR)my_get_proc_address;
                     }
-                    else if (!_stricmp(ibn->Name, "GetModuleHandleW"))
+                    // PEs call GetModuleHandleW(NULL), we ensure this returns their base address
+                    else if (!peinfo->dont_unload && !_stricmp(ibn->Name, "GetModuleHandleW"))
                     {
                         DPRINT("IAT hooking %s!%s with my_get_module_handle_w", name, ibn->Name);
                         ft->u1.Function = (ULONG_PTR)my_get_module_handle_w;
                     }
+                    // resolve the API without IAT hook
                     else
                     {
                         ft->u1.Function = (ULONG_PTR)xGetProcAddress(dll, ibn->Name, 0);

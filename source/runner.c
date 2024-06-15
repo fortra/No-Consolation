@@ -70,26 +70,10 @@ BOOL set_thread_context(
 BOOL prepare_thread(
     IN PLOADED_PE_INFO peinfo)
 {
-    DllMain_t DllMain = NULL;
-
     if (peinfo->is_dll)
     {
         if (peinfo->method)
         {
-            if (peinfo->DllMain)
-            {
-                /*
-                 * The operator specified a method to run.
-                 * Before we run it, we must first call DllMain,
-                 * we do that with our current thread (meaning, no hwbp)
-                 */
-
-                DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
-
-                DllMain = peinfo->DllMain;
-                DllMain(peinfo->pe_base, DLL_PROCESS_ATTACH, NULL);
-            }
-
             DPRINT("Executing %ls!%s", peinfo->pe_wname, peinfo->method);
 
             if (peinfo->cmdwline || peinfo->cmdline)

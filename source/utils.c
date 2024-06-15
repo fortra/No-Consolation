@@ -1,5 +1,158 @@
 #include "utils.h"
 
+VOID myRtlInitUnicodeString(
+    OUT PUNICODE_STRING DestinationString,
+    IN PCWSTR SourceString)
+{
+    SIZE_T Length;
+
+    DestinationString->MaximumLength = 0;
+    DestinationString->Length = 0;
+    DestinationString->Buffer = (PWCH)SourceString;
+
+    if (ARGUMENT_PRESENT(SourceString)) {
+        Length = StringLengthW(SourceString) * sizeof(WCHAR);
+        if (Length >= MAX_USTRING) {
+            Length = MAX_USTRING - sizeof(UNICODE_NULL);
+        }
+
+        DestinationString->Length = (USHORT)Length;
+        DestinationString->MaximumLength = (USHORT)(Length + sizeof(UNICODE_NULL));
+    }
+}
+
+SIZE_T StringLengthW(
+    IN LPCWSTR String)
+{
+    LPCWSTR String2;
+
+    for (String2 = String; *String2; ++String2);
+
+    return (String2 - String);
+}
+
+PCHAR StringCopyA(
+    IN PCHAR String1,
+    IN PCHAR String2)
+{
+    PCHAR p = String1;
+
+    while ((*p++ = *String2++) != 0);
+
+    return String1;
+}
+
+SIZE_T WCharStringToCharString(
+    IN PCHAR Destination,
+    IN PWCHAR Source,
+    IN SIZE_T MaximumAllowed)
+{
+    INT Length = MaximumAllowed;
+
+    if (!MaximumAllowed)
+        return 0;
+
+    while (--Length >= 0)
+    {
+        if (!(*Destination++ = *Source++))
+            return MaximumAllowed - Length - 1;
+    }
+
+    return MaximumAllowed - Length;
+}
+
+SIZE_T CharStringToWCharString(
+    IN PWCHAR Destination,
+    IN PCHAR Source,
+    IN SIZE_T MaximumAllowed)
+{
+    INT Length = (INT)MaximumAllowed;
+
+    while (--Length >= 0)
+    {
+        if ( ! ( *Destination++ = *Source++ ) )
+            return MaximumAllowed - Length - 1;
+    }
+
+    return MaximumAllowed - Length;
+}
+
+LONG RtlCompareUnicodeString(
+    IN PCUNICODE_STRING String1,
+    IN PCUNICODE_STRING String2,
+    IN BOOLEAN CaseInSensitive)
+{
+    return RtlCompareUnicodeStrings(String1->Buffer, String1->Length,
+                                    String2->Buffer, String2->Length,
+                                    CaseInSensitive);
+}
+
+VOID RtlInitEmptyUnicodeString(
+    OUT PUNICODE_STRING UnicodeString,
+    IN PWCHAR Buffer,
+    IN UINT16 BufferSize)
+{
+    memset(UnicodeString, 0, sizeof(*UnicodeString));
+    UnicodeString->MaximumLength = BufferSize;
+    UnicodeString->Buffer = Buffer;
+}
+
+LONG RtlCompareUnicodeStrings(
+    IN CONST WCHAR* String1,
+    IN SIZE_T Length1,
+    IN CONST WCHAR* String2,
+    IN SIZE_T Length2,
+    IN BOOLEAN CaseInSensitive)
+{
+    CONST WCHAR* s1, * s2, * Limit;
+    LONG n1, n2;
+    UINT32 c1, c2;
+
+    if (Length1 > LONG_MAX || Length2 > LONG_MAX) {
+        return STATUS_INVALID_BUFFER_SIZE;
+    }
+
+    s1 = String1;
+    s2 = String2;
+    n1 = (LONG)Length1;
+    n2 = (LONG)Length2;
+
+    Limit = (WCHAR*)((CHAR*)s1 + (n1 <= n2 ? n1 : n2));
+    if (CaseInSensitive) {
+        while (s1 < Limit) {
+            c1 = *s1;
+            c2 = *s2;
+            if (c1 != c2) {
+
+                //
+                // Note that this needs to reference the translation table!
+                //
+                c1 = RTL_UPCASE(c1);
+                c2 = RTL_UPCASE(c2);
+                if (c1 != c2) {
+                    return (INT32)(c1)-(INT32)(c2);
+                }
+            }
+            s1 += 1;
+            s2 += 1;
+        }
+
+    } else {
+
+        while (s1 < Limit) {
+            c1 = *s1;
+            c2 = *s2;
+            if (c1 != c2) {
+                return (LONG)(c1)-(LONG)(c2);
+            }
+            s1 += 1;
+            s2 += 1;
+        }
+    }
+
+    return n1 - n2;
+}
+
 BOOL string_is_included(
     IN PCHAR list_of_strings,
     IN PCHAR string_to_search)

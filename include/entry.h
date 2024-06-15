@@ -48,6 +48,7 @@ typedef struct _LOADED_PE_INFO {
     PVOID        DllMain;
     PVOID        DllParam;
     BOOL         is_dll;
+    BOOL         is_dependency;
     BOOL         loaded_msvcrt;
     BOOL         loaded_mscoree;
     BOOL         loaded_ucrtbase;

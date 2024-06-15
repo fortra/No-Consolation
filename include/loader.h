@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "bofdefs.h"
 #include "console.h"
+#include "apisetlookup.h"
 
 #ifdef _WIN64
 #define MACHINE 0x8664
@@ -45,4 +46,4 @@ BOOL IsReadable(
 BOOL load_pe(
     IN PVOID pedata,
     IN UINT32 pelen,
-    OUT PLOADED_PE_INFO peinfo);
+    IN OUT PLOADED_PE_INFO peinfo);

@@ -4,7 +4,7 @@
 BOOL load_pe(
     IN PVOID pedata,
     IN UINT32 pelen,
-    OUT PLOADED_PE_INFO peinfo)
+    IN OUT PLOADED_PE_INFO peinfo)
 {
     PIMAGE_DOS_HEADER           dos         = NULL;
     PIMAGE_NT_HEADERS           nt          = NULL;
@@ -31,6 +31,7 @@ BOOL load_pe(
     PBYTE                       ofs         = NULL;
     PCHAR                       str         = NULL;
     PCHAR                       name        = NULL;
+    BOOL                        api_set_ok  = FALSE;
     HMODULE                     dll         = NULL;
     LPVOID                      base        = NULL;
     DWORD                       i           = 0;
@@ -44,6 +45,7 @@ BOOL load_pe(
     SIZE_T                      pe_size     = 0;
     BOOL                        has_reloc   = FALSE;
     BOOL                        loaded      = FALSE;
+    DllMain_t                   DllMain     = NULL;
 
     if (!is_pe(pedata))
     {
@@ -188,12 +190,20 @@ BOOL load_pe(
         for (; imp->Name != 0; imp++)
         {
             name = RVA2VA(PCHAR, pe_base, imp->Name);
+            name = api_set_resolve(name);
+            api_set_ok = name != NULL;
+            if (!api_set_ok)
+            {
+                name = RVA2VA(PCHAR, pe_base, imp->Name);
+            }
 
             dll = xGetLibAddress(name, TRUE, &loaded);
 
             if (!dll)
             {
                 DPRINT_ERR("Failed to load %s", name);
+                if (api_set_ok)
+                    intFree(name);
                 goto Cleanup;
             }
 
@@ -226,6 +236,8 @@ BOOL load_pe(
                     if (!ft->u1.Function)
                     {
                         DPRINT_ERR("Failed get address of ordinal %d from %s", oft->u1.Ordinal, name);
+                        if (api_set_ok)
+                            intFree(name);
                         goto Cleanup;
                     }
                 }
@@ -261,9 +273,16 @@ BOOL load_pe(
                     if (!ft->u1.Function)
                     {
                         DPRINT_ERR("Failed get address of %s!%s", name, ibn->Name);
+                        if (api_set_ok)
+                            intFree(name);
                         goto Cleanup;
                     }
                 }
+            }
+
+            if (api_set_ok)
+            {
+                intFree(name); name = NULL;
             }
         }
     }
@@ -280,6 +299,15 @@ BOOL load_pe(
         for (; del->DllNameRVA != 0; del++)
         {
             name = RVA2VA(PCHAR, pe_base, del->DllNameRVA);
+            name = api_set_resolve(name);
+            api_set_ok = name != NULL;
+            if (!api_set_ok)
+            {
+                name = RVA2VA(PCHAR, pe_base, del->DllNameRVA);
+            }
+
+            // if the name is empty, just continue
+            if (name[0] == '\0') continue;
 
             dll = xGetLibAddress(name, TRUE, &loaded);
 
@@ -309,6 +337,11 @@ BOOL load_pe(
                     ibn = RVA2VA(PIMAGE_IMPORT_BY_NAME, pe_base, oft->u1.AddressOfData);
                     ft->u1.Function = (ULONG_PTR)xGetProcAddress(dll, ibn->Name, 0);
                 }
+            }
+
+            if (api_set_ok)
+            {
+                intFree(name); name = NULL;
             }
         }
     }
@@ -451,13 +484,22 @@ BOOL load_pe(
                 }
             }
         }
+
+        // call DllMain if apropiate
+        if ((peinfo->is_dependency || peinfo->method) && peinfo->DllMain)
+        {
+            DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
+
+            DllMain = peinfo->DllMain;
+            DllMain(peinfo->pe_base, DLL_PROCESS_ATTACH, NULL);
+        }
     }
     else
     {
         peinfo->EntryPoint = RVA2VA(PVOID, pe_base, nt->OptionalHeader.AddressOfEntryPoint);
     }
 
-    if (!SetCommandLineW(peinfo->cmdwline))
+    if (!peinfo->is_dependency && !SetCommandLineW(peinfo->cmdwline))
     {
         goto Cleanup;
     }

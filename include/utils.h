@@ -1,5 +1,51 @@
 #pragma once
 
+#define ARGUMENT_PRESENT(ArgumentPointer) \
+  ((CHAR*)((ULONG_PTR)(ArgumentPointer)) != (CHAR*)NULL)
+
+#define MAXUSHORT 65535
+#define MAX_USTRING ( sizeof(WCHAR) * (MAXUSHORT/sizeof(WCHAR)) )
+
+#define STATUS_INVALID_BUFFER_SIZE 0xC0000206
+
+VOID myRtlInitUnicodeString(
+    OUT PUNICODE_STRING DestinationString,
+    IN PCWSTR SourceString);
+
+SIZE_T StringLengthW(
+    IN LPCWSTR String);
+
+PCHAR StringCopyA(
+    IN PCHAR String1,
+    IN PCHAR String2);
+
+SIZE_T WCharStringToCharString(
+    IN PCHAR Destination,
+    IN PWCHAR Source,
+    IN SIZE_T MaximumAllowed);
+
+SIZE_T CharStringToWCharString(
+    IN PWCHAR Destination,
+    IN PCHAR Source,
+    IN SIZE_T MaximumAllowed);
+
+LONG RtlCompareUnicodeString(
+    IN PCUNICODE_STRING String1,
+    IN PCUNICODE_STRING String2,
+    IN BOOLEAN CaseInSensitive);
+
+VOID RtlInitEmptyUnicodeString(
+    OUT PUNICODE_STRING UnicodeString,
+    IN PWCHAR Buffer,
+    IN UINT16 BufferSize);
+
+LONG RtlCompareUnicodeStrings(
+    IN CONST WCHAR* String1,
+    IN SIZE_T Length1,
+    IN CONST WCHAR* String2,
+    IN SIZE_T Length2,
+    IN BOOLEAN CaseInSensitive);
+
 BOOL string_is_included(
     IN PCHAR list_of_strings,
     IN PCHAR string_to_search);

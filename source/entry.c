@@ -7,6 +7,7 @@
 #include "runner.c"
 #include "hwbp.c"
 #include "utils.c"
+#include "apisetlookup.c"
 
 int go(IN PCHAR Buffer, IN ULONG Length)
 {
@@ -88,6 +89,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->unload_libs   = unload_libs;
     peinfo->link_to_peb   = link_to_peb;
     peinfo->dont_unload   = dont_unload;
+    peinfo->is_dependency = FALSE;
 
     // save a reference to peinfo
     BeaconAddValue(NC_PE_INFO_KEY, peinfo);
@@ -228,6 +230,10 @@ Cleanup:
 
         if (peinfo && peinfo->ldr_entry)
         {
+            memset(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->BaseDllName.Buffer, 0, sizeof(WCHAR) * MAX_PATH);
+            intFree(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->BaseDllName.Buffer);
+            memset(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->FullDllName.Buffer, 0, sizeof(WCHAR) * MAX_PATH);
+            intFree(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->FullDllName.Buffer);
             memset(peinfo->ldr_entry, 0, sizeof(PLDR_DATA_TABLE_ENTRY2));
             intFree(peinfo->ldr_entry);
         }

@@ -570,13 +570,6 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
 
     nt = RVA2VA(PIMAGE_NT_HEADERS, base_address, ((PIMAGE_DOS_HEADER)base_address)->e_lfanew);
 
-    VOID ( WINAPI *RtlInitUnicodeString ) ( PUNICODE_STRING, PCWSTR ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlInitUnicodeString", 0);
-    if (!RtlInitUnicodeString)
-    {
-        api_not_found("RtlInitUnicodeString");
-        return NULL;
-    }
-
     NTSTATUS ( WINAPI *NtQuerySystemTime ) ( PLARGE_INTEGER ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "NtQuerySystemTime", 0);
     if (!NtQuerySystemTime)
     {
@@ -612,8 +605,8 @@ PLDR_DATA_TABLE_ENTRY2 create_ldr_entry(
     ldr_entry->DllBase               = base_address;
     ldr_entry->SizeOfImage           = nt->OptionalHeader.SizeOfImage;
     ldr_entry->TimeDateStamp         = nt->FileHeader.TimeDateStamp;
-    RtlInitUnicodeString(&ldr_entry->BaseDllName, pe_wname);
-    RtlInitUnicodeString(&ldr_entry->FullDllName, pe_wpath);
+    myRtlInitUnicodeString(&ldr_entry->BaseDllName, pe_wname);
+    myRtlInitUnicodeString(&ldr_entry->FullDllName, pe_wpath);
     ldr_entry->ObsoleteLoadCount     = 1;
     ldr_entry->Flags                 = LDRP_IMAGE_DLL | LDRP_ENTRY_INSERTED | LDRP_ENTRY_PROCESSED | LDRP_PROCESS_ATTACH_CALLED | LDRP_DONT_CALL_FOR_THREADS;
     ldr_entry->BaseNameHashValue     = ldr_hash_entry(ldr_entry->BaseDllName, FALSE);

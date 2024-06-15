@@ -1,5 +1,9 @@
 #pragma once
 
+BOOL string_is_included(
+    IN PCHAR list_of_strings,
+    IN PCHAR string_to_search);
+
 BOOL find_pattern(
     IN PVOID dwAddress,
     IN ULONG32 dwLen,

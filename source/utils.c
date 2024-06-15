@@ -1,5 +1,28 @@
 #include "utils.h"
 
+BOOL string_is_included(
+    IN PCHAR list_of_strings,
+    IN PCHAR string_to_search)
+{
+    CHAR  some_string[256] = { 0 };
+    INT   i                = 0;
+
+    for (;;)
+    {
+        // store string until null byte or semi-colon encountered
+        for (i = 0; list_of_strings[i] != '\0' && list_of_strings[i] != ';' && i < 256; i++) some_string[i] = list_of_strings[i];
+        // nothing stored? end
+        if (i == 0) break;
+        // skip name plus one for separator
+        list_of_strings += (i + 1);
+        // store null terminator
+        some_string[i] = '\0';
+        // if equal, return TRUE
+        if (!_stricmp(some_string, string_to_search)) return TRUE;
+    }
+    return FALSE;
+}
+
 BOOL compare_bytes(
     IN PBYTE pData,
     IN PBYTE bMask,

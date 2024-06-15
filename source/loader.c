@@ -512,26 +512,8 @@ Cleanup:
 BOOL IsExitAPI(
     IN PCHAR name)
 {
-    PCHAR str      = NULL;
-    CHAR  api[128] = { 0 };
-    INT   i        = 0;
-
-    str = "ExitProcess;exit;_exit;_cexit;_c_exit;quick_exit;_Exit;_o_exit;CorExitProcess\0";
-
-    for (;;)
-    {
-        // store string until null byte or semi-colon encountered
-        for (i = 0; str[i] != '\0' && str[i] != ';' && i < 128; i++) api[i] = str[i];
-        // nothing stored? end
-        if (i == 0) break;
-        // skip name plus one for separator
-        str += (i + 1);
-        // store null terminator
-        api[i] = '\0';
-        // if equal, return TRUE
-        if (!_stricmp(api, name)) return TRUE;
-    }
-    return FALSE;
+    PCHAR str = "ExitProcess;exit;_exit;_cexit;_c_exit;quick_exit;_Exit;_o_exit;CorExitProcess\0";
+    return string_is_included(str, name);
 }
 
 // returns TRUE if ptr is heap memory

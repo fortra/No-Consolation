@@ -105,10 +105,7 @@ BOOL load_pe(
             source,
             sh[i].SizeOfRawData);
 
-        // Update the actual address of the section
-        sh[i].Misc.PhysicalAddress = (DWORD)*dest;
-
-        DPRINT("Copied %s", sh[i].Name);
+        DPRINT("Copied %s at 0x%p", sh[i].Name, dest);
     }
 
     ofs  = (PBYTE)pe_base - nt->OptionalHeader.ImageBase;

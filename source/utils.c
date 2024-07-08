@@ -286,7 +286,7 @@ VOID store_loaded_dll(
     lib_loaded = intAlloc((sizeof(LIB_LOADED)));
     if (!lib_loaded)
         return;
-    memcpy(lib_loaded->name, name, MAX_PATH);
+    StringCopyA(lib_loaded->name, name);
     lib_loaded->address = dll;
     lib_loaded->next    = peinfo->libs_loaded;
     peinfo->libs_loaded = lib_loaded;

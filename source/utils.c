@@ -649,10 +649,9 @@ BOOL save_pe_info(
 
     // encrypt the PE
     run_xor_on_pe(saved_pe);
-
-    memcpy(saved_pe->pe_name, pe_name, MAX_PATH);
-    memcpy(saved_pe->username, username, MAX_PATH);
-    memcpy(saved_pe->loadtime, loadtime, MAX_PATH);
+    StringCopyA(saved_pe->pe_name, pe_name);
+    StringCopyA(saved_pe->username, username);
+    StringCopyA(saved_pe->loadtime, loadtime);
 
     // add PE to linked list
     tmp = BeaconGetValue(NC_SAVED_PE_KEY);

@@ -1,5 +1,358 @@
 #include "utils.h"
 
+#ifdef _WIN64
+
+// TODO: implement ntdll!LdrpHandleTlsData
+PVOID find_ldrp_handle_tls_data(VOID)
+{
+    PIMAGE_NT_HEADERS      nt             = NULL;
+    PIMAGE_DOS_HEADER      dos            = NULL;
+    DWORD                  rva            = 0;
+    DWORD                  size           = 0;
+    PRUNTIME_FUNCTION      func_table     = NULL;
+    PRUNTIME_FUNCTION      func_entry     = NULL;
+    PVOID                  func_addr      = NULL;
+    DWORD                  func_size      = 0;
+    PBYTE                  bytes_to_match = (PBYTE)"\xba\x23\x00\x00\x00\x48\x83\xc9\xff\xe8";
+    PVOID                  address        = NULL;
+    PVOID                  rip            = NULL;
+    PVOID                  nt_set         = NULL;
+    DWORD                  offset         = 0;
+    PMEMORY_STRUCTS        mem_structs    = NULL;
+
+    /*
+     * We parse the export directory to get a reference to all non-leaf functions in ntdll.
+     * For each one, we check if we find a call to NtSetInformationProcess with
+     * PROCESS_INFORMATION_CLASS set to ProcessTlsInformation (0x23)
+     */
+
+    mem_structs = BeaconGetValue(NC_MEM_STRUCTS_KEY);
+    if (mem_structs && mem_structs->ldrp_handle_tls_data)
+        return mem_structs->ldrp_handle_tls_data;
+
+    dos    = xGetLibAddress("ntdll", TRUE, NULL);
+    nt     = RVA2VA(PIMAGE_NT_HEADERS, dos, dos->e_lfanew);
+    nt_set = xGetProcAddress(dos, "NtSetInformationProcess", 0);
+    if (!nt_set)
+    {
+        api_not_found("NtSetInformationProcess");
+        return NULL;
+    }
+
+    rva  = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
+    size = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size / sizeof(RUNTIME_FUNCTION);
+    func_table = RVA2VA(PRUNTIME_FUNCTION, dos, rva);
+    // iterate over each non-leaf functions in ntdll
+    for (DWORD i = 0; i < size; ++i)
+    {
+        func_entry = RVA2VA(PRUNTIME_FUNCTION, func_table, (sizeof(RUNTIME_FUNCTION) * i));
+        func_addr  = RVA2VA(PVOID, dos, func_entry->BeginAddress);
+        func_size  = func_entry->EndAddress - func_entry->BeginAddress;
+        // search for the byte pattern on this function
+        if (find_pattern(func_addr, func_size, bytes_to_match, "xxxxxxxxxx", &address))
+        {
+            /*
+             * We found a function call with the parameters -1 and 0x28, lets confirm
+             * the function being called is indeed NtSetInformationProcess
+             */
+
+            rip     = RVA2VA(PVOID, address, 10 + sizeof(DWORD));
+            offset  = (ULONG_PTR)nt_set - (ULONG_PTR)rip;
+            address = RVA2VA(PVOID, address, 10);
+            if (*(PDWORD)address == offset)
+            {
+                // if the offset matches, then the function being call is NtSetInformationProcess
+
+                // save the address of the ldrp_handle_tls_data;
+                if (mem_structs)
+                    mem_structs->ldrp_handle_tls_data = func_addr;
+
+                return func_addr;
+            }
+        }
+    }
+
+    api_not_found("LdrpHandleTlsData");
+
+    return NULL;
+}
+
+// TODO: implement ntdll!LdrpReleaseTlsEntry
+PVOID find_ldrp_release_tls_entry(VOID)
+{
+    PIMAGE_NT_HEADERS      nt             = NULL;
+    PIMAGE_DOS_HEADER      dos            = NULL;
+    DWORD                  rva            = 0;
+    DWORD                  size           = 0;
+    PRUNTIME_FUNCTION      func_table     = NULL;
+    PRUNTIME_FUNCTION      func_entry     = NULL;
+    PVOID                  func_addr      = NULL;
+    DWORD                  func_size      = 0;
+    PBYTE                  bytes_to_match = (PBYTE)"\x0f\xb3\x01";
+    PVOID                  address        = NULL;
+    PMEMORY_STRUCTS        mem_structs    = NULL;
+
+    /*
+     * We parse the export directory to get a reference to all non-leaf functions in ntdll.
+     * For each one, we check if we find the pattern matching
+     */
+
+    mem_structs = BeaconGetValue(NC_MEM_STRUCTS_KEY);
+    if (mem_structs && mem_structs->ldrp_release_tls_entry)
+        return mem_structs->ldrp_release_tls_entry;
+
+    dos    = xGetLibAddress("ntdll", TRUE, NULL);
+    nt     = RVA2VA(PIMAGE_NT_HEADERS, dos, dos->e_lfanew);
+
+    rva  = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
+    size = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size / sizeof(RUNTIME_FUNCTION);
+    func_table = RVA2VA(PRUNTIME_FUNCTION, dos, rva);
+    // iterate over each non-leaf functions in ntdll
+    for (DWORD i = 0; i < size; ++i)
+    {
+        func_entry = RVA2VA(PRUNTIME_FUNCTION, func_table, (sizeof(RUNTIME_FUNCTION) * i));
+        func_addr  = RVA2VA(PVOID, dos, func_entry->BeginAddress);
+        func_size  = func_entry->EndAddress - func_entry->BeginAddress;
+        // search for the byte pattern on this function
+        if (find_pattern(func_addr, func_size, bytes_to_match, "xxx", &address))
+        {
+            // save the address of the ldrp_release_tls_entry;
+            if (mem_structs)
+                mem_structs->ldrp_release_tls_entry = func_addr;
+
+            return func_addr;
+        }
+    }
+
+    api_not_found("LdrpReleaseTlsEntry");
+
+    return NULL;
+}
+
+#else // _WIN64
+
+PVOID find_ldrp_handle_tls_data(VOID)
+{
+    PIMAGE_NT_HEADERS      nt          = NULL;
+    PIMAGE_DOS_HEADER      dos         = NULL;
+    PIMAGE_SECTION_HEADER  pSection    = NULL;
+    PBYTE                  nt_set_call = (PBYTE)"\x6a\x23\x6a\xff\xe8";
+    PBYTE                  func_start  = (PBYTE)"\x6a\x00\x68";
+    PVOID                  address     = NULL;
+    PVOID                  start       = NULL;
+    PVOID                  rip         = NULL;
+    PVOID                  nt_set      = NULL;
+    DWORD                  offset      = 0;
+    PVOID                  stBegin     = NULL;
+    PVOID                  stEnd       = NULL;
+    DWORD                  dwLen       = 0;
+    PMEMORY_STRUCTS        mem_structs = NULL;
+
+    // on x86, there is no export directory, so we search the entire .text section
+
+    mem_structs = BeaconGetValue(NC_MEM_STRUCTS_KEY);
+    if (mem_structs && mem_structs->ldrp_handle_tls_data)
+        return mem_structs->ldrp_handle_tls_data;
+
+    dos    = xGetLibAddress("ntdll", TRUE, NULL);
+    nt     = RVA2VA(PIMAGE_NT_HEADERS, dos, dos->e_lfanew);
+    nt_set = xGetProcAddress(dos, "NtSetInformationProcess", 0);
+    if (!nt_set)
+    {
+        api_not_found("NtSetInformationProcess");
+        return NULL;
+    }
+
+    // find the .text section
+    pSection = IMAGE_FIRST_SECTION(nt);
+    for (INT i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        if (!strncmp(".text", (LPCSTR)pSection->Name, 8))
+        {
+            stBegin = RVA2VA(PVOID, dos, pSection->VirtualAddress);
+            dwLen = pSection->Misc.VirtualSize;
+            break;
+        }
+
+        ++pSection;
+    }
+
+    if (!stBegin || !dwLen)
+    {
+        DPRINT("Failed to find section");
+        return NULL;
+    }
+
+    stEnd = RVA2VA(PVOID, stBegin, dwLen);
+
+    while ((ULONG_PTR)stBegin + 5 < (ULONG_PTR)stEnd)
+    {
+        dwLen = (ULONG_PTR)stEnd - (ULONG_PTR)stBegin;
+        if (find_pattern(stBegin, dwLen, nt_set_call, "xxxxx", &address))
+        {
+            /*
+             * We found a function call with the parameters -1 and 0x28, lets confirm
+             * the function being called is indeed NtSetInformationProcess
+             */
+
+            rip     = RVA2VA(PVOID, address, 5 + sizeof(DWORD));
+            offset  = (ULONG_PTR)nt_set - (ULONG_PTR)rip;
+            address = RVA2VA(PVOID, address, 5);
+            if (*(PDWORD)address == offset)
+            {
+                /*
+                 * If the offset matches, then the function being call is NtSetInformationProcess,
+                 * but on x86, we still need to find the start of the function, we use another
+                 * pattern match for that
+                 */
+
+                for (int i = 0; i < 0x300; ++i)
+                {
+                    start = RVA2VA(PVOID, address, - i);
+                    if (find_pattern(start, 3, func_start, "x?x", NULL))
+                    {
+                        // save the address of the ldrp_handle_tls_data;
+                        if (mem_structs)
+                            mem_structs->ldrp_handle_tls_data = start;
+
+                        return start;
+                    }
+                }
+            }
+
+            stBegin = address;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    api_not_found("LdrpHandleTlsData")
+
+    return NULL;
+}
+
+PVOID find_ldrp_release_tls_entry(VOID)
+{
+    PIMAGE_NT_HEADERS      nt          = NULL;
+    PIMAGE_DOS_HEADER      dos         = NULL;
+    PIMAGE_SECTION_HEADER  pSection    = NULL;
+    PBYTE                  peb_bytes   = (PBYTE)"\x64\xa1\x30\x00\x00\x00\x56\x57\xff\x70\x18";
+    PBYTE                  func_start  = (PBYTE)"\x8b\xff";
+    PVOID                  address     = NULL;
+    PVOID                  start       = NULL;
+    PVOID                  stBegin     = NULL;
+    PVOID                  stEnd       = NULL;
+    DWORD                  dwLen       = 0;
+    PMEMORY_STRUCTS        mem_structs = NULL;
+
+    // on x86, there is no export directory, so we search the entire .text section
+
+    mem_structs = BeaconGetValue(NC_MEM_STRUCTS_KEY);
+    if (mem_structs && mem_structs->ldrp_release_tls_entry)
+        return mem_structs->ldrp_release_tls_entry;
+
+    dos    = xGetLibAddress("ntdll", TRUE, NULL);
+    nt     = RVA2VA(PIMAGE_NT_HEADERS, dos, dos->e_lfanew);
+
+    // find the .text section
+    pSection = IMAGE_FIRST_SECTION(nt);
+    for (INT i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        if (!strncmp(".text", (LPCSTR)pSection->Name, 8))
+        {
+            stBegin = RVA2VA(PVOID, dos, pSection->VirtualAddress);
+            dwLen = pSection->Misc.VirtualSize;
+            break;
+        }
+
+        ++pSection;
+    }
+
+    if (!stBegin || !dwLen)
+    {
+        DPRINT("Failed to find section");
+        return NULL;
+    }
+
+    stEnd = RVA2VA(PVOID, stBegin, dwLen);
+
+    while ((ULONG_PTR)stBegin + 11 < (ULONG_PTR)stEnd)
+    {
+        dwLen = (ULONG_PTR)stEnd - (ULONG_PTR)stBegin;
+        if (find_pattern(stBegin, dwLen, peb_bytes, "xxxxxxxxxxx", &address))
+        {
+            for (int i = 0; i < 0x100; ++i)
+            {
+                start = RVA2VA(PVOID, address, - i);
+                if (find_pattern(start, 2, func_start, "xx", NULL))
+                {
+                    // save the address of the ldrp_release_tls_entry;
+                    if (mem_structs)
+                        mem_structs->ldrp_release_tls_entry = start;
+
+                    return start;
+                }
+            }
+
+            stBegin = address;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    api_not_found("LdrpReleaseTlsEntry")
+
+    return NULL;
+}
+
+#endif
+
+VOID insert_tail_list(
+    PLIST_ENTRY ListHead,
+    PLIST_ENTRY Entry)
+{
+    PLIST_ENTRY Blink;
+
+    Blink = ListHead->Blink;
+    Entry->Flink = ListHead;
+    Entry->Blink = Blink;
+    Blink->Flink = Entry;
+    ListHead->Blink = Entry;
+}
+
+VOID unlink_from_list(
+    PLIST_ENTRY Entry)
+{
+    Entry->Flink->Blink = Entry->Blink;
+    Entry->Blink->Flink = Entry->Flink;
+}
+
+SIZE_T StringLengthA(
+    IN LPCSTR String)
+{
+    LPCSTR String2;
+
+    if ( String == NULL )
+        return 0;
+
+    for (String2 = String; *String2; ++String2);
+
+    return (String2 - String);
+}
+
+PCHAR StringConcatA(
+    IN PCHAR String,
+    IN PCHAR String2)
+{
+    StringCopyA( &String[ StringLengthA( String ) ], String2 );
+
+    return String;
+}
+
 VOID myRtlInitUnicodeString(
     OUT PUNICODE_STRING DestinationString,
     IN PCWSTR SourceString)
@@ -162,8 +515,10 @@ BOOL string_is_included(
 
     for (;;)
     {
-        // store string until null byte or semi-colon encountered
-        for (i = 0; list_of_strings[i] != '\0' && list_of_strings[i] != ';' && i < 256; i++) some_string[i] = list_of_strings[i];
+        // store string until null byte, semi-colon or comma encountered
+        for (i = 0; list_of_strings[i] != '\0' &&
+                    list_of_strings[i] != ';' &&
+                    list_of_strings[i] != ',' && i < 256; i++) some_string[i] = list_of_strings[i];
         // nothing stored? end
         if (i == 0) break;
         // skip name plus one for separator
@@ -203,7 +558,8 @@ BOOL find_pattern(
         current_address = RVA2VA(PVOID, dwAddress, i);
         if (compare_bytes(current_address, bMask, szMask))
         {
-            *pattern_addr = current_address;
+            if (pattern_addr)
+                *pattern_addr = current_address;
             return TRUE;
         }
     }
@@ -264,22 +620,21 @@ VOID store_loaded_dll(
     IN HMODULE dll,
     IN PCHAR name)
 {
-    PLIB_LOADED lib_loaded = NULL;
+    PLIBS_LOADED libs_loaded = NULL;
+    PLIB_LOADED  lib_loaded = NULL;
 
     if (!peinfo)
         return;
 
-    if (!peinfo->unload_libs)
-        return;
-
     // first, check we didn't include this lib already
-    lib_loaded = peinfo->libs_loaded;
-    while (lib_loaded)
+    libs_loaded = BeaconGetValue(NC_LOADED_DLL_KEY);
+    lib_loaded = (PLIB_LOADED)libs_loaded->list.Flink;
+    while (&lib_loaded->list != &libs_loaded->list)
     {
-        if (lib_loaded->address == dll)
+        if (!_stricmp(lib_loaded->peinfo->pe_name, name))
             return;
 
-        lib_loaded = lib_loaded->next;
+        lib_loaded = (PLIB_LOADED)lib_loaded->list.Flink;
     }
 
     // add this DLL to the linked list
@@ -288,8 +643,9 @@ VOID store_loaded_dll(
         return;
     StringCopyA(lib_loaded->name, name);
     lib_loaded->address = dll;
-    lib_loaded->next    = peinfo->libs_loaded;
-    peinfo->libs_loaded = lib_loaded;
+    lib_loaded->peinfo  = peinfo;
+
+    insert_tail_list(&libs_loaded->list, &lib_loaded->list);
 }
 
 /*
@@ -303,22 +659,7 @@ FARPROC WINAPI my_get_proc_address(
     IN HMODULE hModule,
     IN LPSTR lpProcName)
 {
-    if (IsExitAPI(lpProcName))
-    {
-        DPRINT("Replacing %p!%s with ntdll!RtlExitUserThread", hModule, lpProcName);
-        return xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
-    }
-
-    FARPROC ( WINAPI *GetProcAddress ) ( HMODULE, LPSTR ) = xGetProcAddress(xGetLibAddress("kernel32", TRUE, NULL), "GetProcAddress", 0);
-    if ( GetProcAddress )
-    {
-        return GetProcAddress(hModule, lpProcName);
-    }
-    else
-    {
-        api_not_found("GetProcAddress");
-        return NULL;
-    }
+    return handle_import(NULL, hModule, NULL, lpProcName);
 }
 
 /*
@@ -1066,4 +1407,4 @@ Cleanup:
     return Success;
 }
 
-#endif
+#endif // _WIN64

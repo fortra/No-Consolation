@@ -878,5 +878,7 @@ PCHAR api_set_resolve(
 
     resolved = intAlloc(sizeof(CHAR) * MAX_PATH);
     WCharStringToCharString(resolved, uresolved.Buffer, uresolved.MaximumLength / 2);
+    //DPRINT("api set resolved %s -> %s", dll_name, resolved);
+
     return resolved;
 }

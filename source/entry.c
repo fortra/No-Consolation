@@ -37,10 +37,15 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     LPSTR           loadtime      = NULL;
     BOOL            link_to_peb   = FALSE;
     BOOL            dont_unload   = FALSE;
-    PLIB_LOADED     libs_tmp      = NULL;
-    PLIB_LOADED     libs_entry    = NULL;
-    NTSTATUS        status        = STATUS_UNSUCCESSFUL;
+    BOOL            load_all_deps = FALSE;
+    LPSTR           load_all_deps_but = NULL;
+    LPSTR           load_deps     = NULL;
+    LPSTR           search_paths  = NULL;
+    PLIB_LOADED     lib_loaded    = NULL;
+    PLIB_LOADED     lib_tmp       = NULL;
     PLOADED_PE_INFO peinfo        = NULL;
+    PLIBS_LOADED    libs_loaded   = NULL;
+    PMEMORY_STRUCTS mem_structs   = NULL;
 
     BeaconDataParse(&parser, Buffer, Length);
     pe_wname      = (LPWSTR)BeaconDataExtract(&parser, NULL);
@@ -73,9 +78,17 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     loadtime      = loadtime[0] ? loadtime : NULL;
     link_to_peb   = BeaconDataInt(&parser);
     dont_unload   = BeaconDataInt(&parser);
+    load_all_deps = BeaconDataInt(&parser);
+    load_all_deps_but = BeaconDataExtract(&parser, NULL);
+    load_all_deps_but = load_all_deps_but[0] ? load_all_deps_but : NULL;
+    load_deps     = BeaconDataExtract(&parser, NULL);
+    load_deps     = load_deps[0] ? load_deps : NULL;
+    search_paths  = BeaconDataExtract(&parser, NULL);
+    search_paths  = search_paths[0] ? search_paths : NULL;
 
     peinfo = intAlloc(sizeof(LOADED_PE_INFO));
 
+    StringCopyA(peinfo->pe_name,  pe_name ? pe_name : "NoConsolation.dll");
     wcscpy(peinfo->pe_wname, pe_wname ? pe_wname : L"NoConsolation.dll");
     wcscpy(peinfo->pe_wpath, pe_wpath ? pe_wpath : L"C:\\Windows\\System32\\NoConsolation.dll");
     peinfo->timeout       = timeout;
@@ -90,9 +103,30 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->link_to_peb   = link_to_peb;
     peinfo->dont_unload   = dont_unload;
     peinfo->is_dependency = FALSE;
+    peinfo->load_all_deps = load_all_deps;
+    peinfo->load_all_deps_but = load_all_deps_but;
+    peinfo->load_deps     = load_deps;
+    peinfo->search_paths  = search_paths;
+    peinfo->custom_loaded = TRUE;
 
     // save a reference to peinfo
     BeaconAddValue(NC_PE_INFO_KEY, peinfo);
+
+    // init the 'DLLs loaded' linked list
+    libs_loaded = BeaconGetValue(NC_LOADED_DLL_KEY);
+    if (!libs_loaded)
+    {
+        libs_loaded = intAlloc(sizeof(LIBS_LOADED));
+        libs_loaded->list.Flink = libs_loaded->list.Blink = &libs_loaded->list;
+        BeaconAddValue(NC_LOADED_DLL_KEY, libs_loaded);
+    }
+
+    mem_structs = BeaconGetValue(NC_MEM_STRUCTS_KEY);
+    if (!mem_structs)
+    {
+        mem_structs = intAlloc(sizeof(MEMORY_STRUCTS));
+        BeaconAddValue(NC_MEM_STRUCTS_KEY, mem_structs);
+    }
 
     if (list_pes)
     {
@@ -218,38 +252,6 @@ Cleanup:
         BeaconRemoveValue(NC_HANDLE_INFO_KEY);
     }
 
-    if (!dont_unload)
-    {
-#ifdef _WIN64
-        if (peinfo && peinfo->func_table)
-            remove_inverted_function_table_entry(peinfo->func_table);
-#endif
-
-        if (peinfo && peinfo->linked)
-            unlink_module(peinfo->ldr_entry);
-
-        if (peinfo && peinfo->ldr_entry)
-        {
-            memset(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->BaseDllName.Buffer, 0, sizeof(WCHAR) * MAX_PATH);
-            intFree(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->BaseDllName.Buffer);
-            memset(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->FullDllName.Buffer, 0, sizeof(WCHAR) * MAX_PATH);
-            intFree(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->FullDllName.Buffer);
-            memset(peinfo->ldr_entry, 0, sizeof(PLDR_DATA_TABLE_ENTRY2));
-            intFree(peinfo->ldr_entry);
-        }
-
-        if (peinfo && peinfo->pe_base)
-        {
-            peinfo->pe_size = 0;
-            status = NtFreeVirtualMemory(NtCurrentProcess(), &peinfo->pe_base, &peinfo->pe_size, MEM_RELEASE);
-            if (!NT_SUCCESS(status))
-            {
-                syscall_failed("NtFreeVirtualMemory", status);
-                PRINT_ERR("Failed to cleanup PE from memory");
-            }
-        }
-    }
-
     if (peinfo && peinfo->modified_msvc_stdout)
         memcpy(peinfo->msvc_stdout, peinfo->original_msvc_stdout, sizeof(FILE));
 
@@ -298,9 +300,34 @@ Cleanup:
         NtClose(peinfo->hThread);
     }
 
+    // free all dependencies
+    lib_loaded = (PLIB_LOADED)libs_loaded->list.Flink;
+    while (&lib_loaded->list != &libs_loaded->list)
+    {
+        lib_tmp = (PLIB_LOADED)lib_loaded->list.Flink;
+
+        if (!lib_loaded->peinfo->dont_unload && lib_loaded->peinfo->custom_loaded)
+        {
+            unload_dependency(lib_loaded->peinfo);
+            unlink_from_list(&lib_loaded->list);
+
+            memset(lib_loaded->peinfo, 0, sizeof(LOADED_PE_INFO));
+            intFree(lib_loaded->peinfo);
+            memset(lib_loaded, 0, sizeof(LIB_LOADED));
+            intFree(lib_loaded);
+        }
+
+        lib_loaded = lib_tmp;
+    }
+
+    if (peinfo && !peinfo->dont_unload)
+        unload_dependency(peinfo);
+
+    /*
     if (peinfo && unload_libs)
     {
-        libs_entry = peinfo->libs_loaded;
+        //libs_entry = peinfo->libs_loaded;
+        libs_entry = BeaconGetValue(NC_LOADED_DLL_KEY);
         while (libs_entry)
         {
             DPRINT("Freeing %s", libs_entry->name);
@@ -312,6 +339,7 @@ Cleanup:
             libs_entry = libs_tmp;
         }
     }
+    */
 
     if (peinfo)
     {

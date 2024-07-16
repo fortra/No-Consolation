@@ -1,7 +1,7 @@
 
 alias noconsolation
 {
-    local('$bid $barch $PE $args $path $path_set $name_set $pebytes $x $matchfound $pe_id $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs $dont_save $list_pes $unload_pe $link_to_peb $dont_unload $pepath $pename');
+    local('$bid $barch $PE $args $path $path_set $name_set $pebytes $x $matchfound $pe_id $local $cmdline $headers $method $use_unicode $timeout $nooutput $alloc_console $close_handles $free_libs $dont_save $list_pes $unload_pe $link_to_peb $dont_unload $load_all_deps $load_all_deps_but $load_deps $search_paths $pepath $pename');
 
     $bid = $1;
     $pe_id = 0;
@@ -26,6 +26,10 @@ alias noconsolation
     $unload_pe = '';
     $link_to_peb = 0;
     $dont_unload = 0;
+    $load_all_deps = 0;
+    $load_all_deps_but = '';
+    $load_deps = '';
+    $search_paths = '';
 
     # make sure the beacon is not WoW64
     $is64 = binfo($bid, "is64");
@@ -129,6 +133,46 @@ alias noconsolation
         {
             $dont_unload = 1;
         }
+        else if (@_[$i] eq "--load-all-dependencies" || @_[$i] eq "-lad")
+        {
+            $load_all_deps = 1;
+        }
+        else if (@_[$i] eq "--load-all-dependencies-but" || @_[$i] eq "-ladb")
+        {
+            $i++;
+
+            if($i >= size(@_))
+            {
+                berror($1, "missing --load-all-dependencies-but value");
+                return;
+            }
+
+            $load_all_deps_but = @_[$i];
+        }
+        else if (@_[$i] eq "--load-dependencies" || @_[$i] eq "-ld")
+        {
+            $i++;
+
+            if($i >= size(@_))
+            {
+                berror($1, "missing --load-dependencies value");
+                return;
+            }
+
+            $load_deps = @_[$i];
+        }
+        else if (@_[$i] eq "--search-paths" || @_[$i] eq "-sp")
+        {
+            $i++;
+
+            if($i >= size(@_))
+            {
+                berror($1, "missing --search-paths value");
+                return;
+            }
+
+            $search_paths = @_[$i];
+        }
         else if (-exists @_[$i] || @_[$i] ismatch '^\p{Alpha}:\\\\.*')
         {
             $path_set = 1;
@@ -226,7 +270,7 @@ alias noconsolation
         }
     }
 
-    runpe($bid, $pename, $pepath, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs, $dont_save, $list_pes, $unload_pe, mynick(), tstamp(ticks()), $link_to_peb, $dont_unload);
+    runpe($bid, $pename, $pepath, $pebytes, $path, $local, $timeout, $headers, $cmdline, $method, $use_unicode, $nooutput, $alloc_console, $close_handles, $free_libs, $dont_save, $list_pes, $unload_pe, mynick(), tstamp(ticks()), $link_to_peb, $dont_unload, $load_all_deps, $load_all_deps_but, $load_deps, $search_paths);
 }
 
 sub runpe{
@@ -242,7 +286,7 @@ sub runpe{
     }
 
     # Pack the arguments
-    $args = bof_pack($1, "ZzZbziiiZzziiiiiiizzzii", $2 $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22);
+    $args = bof_pack($1, "ZzZbziiiZzziiiiiiizzziiizzz", $2 $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26);
 
     # Execute BOF
     beacon_inline_execute($1, $data, "go", $args);
@@ -254,21 +298,26 @@ beacon_command_register(
     "
 Summary: Run an unmanaged EXE/DLL inside Beacon's memory.
 
-Usage: noconsolation [--local] [--link-to-peb] [--dont-unload] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] /path/to/binary.exe arg1 arg2
-    --local, -l                           Optional. The binary should be loaded from the target Windows machine
-    --link-to-peb, -ltp                   Optional. Load the PE into the PEB
-    --dont-unload, -du                    Optional. If set, the DLL won't be unloaded.
-    --timeout NUM_SECONDS, -t NUM_SECONDS Optional. The number of seconds you wish to wait for the PE to complete running. Default 60 seconds. Set to 0 to disable
-    -k                                    Optional. Overwrite the PE headers
-    --method EXPORT_NAME, -m EXPORT_NAME  Optional. Method or function name to execute in case of DLL. If not provided, DllMain will be executed
-    -w                                    Optional. Command line is passed to unmanaged DLL function in UNICODE format. (default is ANSI)
-    --no-output, -no                      Optional. Do not try to obtain the output
-    --alloc-console, -ac                  Optional. Allocate a console. This will spawn a new process
-    --close-handles, -ch                  Optional. Close Pipe handles once finished. If PowerShell was already ran, this will break the output for PowerShell in the future
-    --free-libraries, -fl                 Optional. Free all loaded DLLs
-    --dont-save, -ds                      Optional. Do not save this binary in memory
-    --list-pes, -lpe                      Optional. List all PEs that have been loaded in memory
-    --unload-pe PE_NAME, -upe PE_NAME     Optional. Unload from memory a PE
+Usage: noconsolation [--local] [--link-to-peb] [--dont-unload] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] [--load-all-dependencies] [--load-all-dependencies-but advapi32.dll] [--load-dependencies wininet.dll] [--search-paths C:\\Windows\\Temp\\] /path/to/binary.exe arg1 arg2
+    --local, -l                                    Optional. The binary should be loaded from the target Windows machine
+    --link-to-peb, -ltp                            Optional. Load the PE into the PEB
+    --dont-unload, -du                             Optional. If set, the DLL won't be unloaded.
+    --timeout NUM_SECONDS, -t NUM_SECONDS          Optional. The number of seconds you wish to wait for the PE to complete running. Default 60 seconds. Set to 0 to disable
+    -k                                             Optional. Overwrite the PE headers
+    --method EXPORT_NAME, -m EXPORT_NAME           Optional. Method or function name to execute in case of DLL. If not provided, DllMain will be executed
+    -w                                             Optional. Command line is passed to unmanaged DLL function in UNICODE format. (default is ANSI)
+    --no-output, -no                               Optional. Do not try to obtain the output
+    --alloc-console, -ac                           Optional. Allocate a console. This will spawn a new process
+    --close-handles, -ch                           Optional. Close Pipe handles once finished. If PowerShell was already ran, this will break the output for PowerShell in the future
+    --free-libraries, -fl                          Optional. Free all loaded DLLs
+    --dont-save, -ds                               Optional. Do not save this binary in memory
+    --list-pes, -lpe                               Optional. List all PEs that have been loaded in memory
+    --unload-pe PE_NAME, -upe PE_NAME              Optional. Unload from memory a PE
+    --load-all-dependencies, -lad                  Optional. Custom load all the PE's dependencies
+    --load-all-dependencies-but, -ladb DLL_A,DLL_B Optional. Custom load all the PE's dependencies except these
+    --load-dependencies, -ld DLL_A,DLL_B           Optional. Custom load these PE's dependencies
+    --search-paths, -sp PATH_A,PATH_B              Optional. Look for DLLs on these paths (system32 is the default)
+
     /path/to/binary.exe                   Required. Full path to the windows EXE/DLL you wish you run inside Beacon. If already loaded, you can simply specify the binary name.
     ARG1 ARG2                             Optional. Parameters for the PE. Must be provided after the path
 

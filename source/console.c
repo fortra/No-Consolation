@@ -433,6 +433,11 @@ PVOID get_address_of_console_connection_state(VOID)
     LPSTR                 data                   = NULL;
     PVOID                 DataBase               = NULL;
     UINT32                DataSize               = 0;
+    PMEMORY_STRUCTS       mem_structs            = NULL;
+
+    mem_structs = BeaconGetValue(NC_MEM_STRUCTS_KEY);
+    if (mem_structs && mem_structs->console_connection_state)
+        return mem_structs->console_connection_state;
 
     /*
      * If exported, we parse kernelbase!BaseGetConsoleReference.
@@ -495,6 +500,8 @@ PVOID get_address_of_console_connection_state(VOID)
         DPRINT_ERR("ConsoleConnectionState is not in the .data section");
         return NULL;
     }
+
+    mem_structs->console_connection_state = ConsoleConnectionState;
 
     return ConsoleConnectionState;
 }

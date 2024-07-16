@@ -18,6 +18,17 @@
 
 #define NtCurrentProcess() ( (HANDLE)(LONG_PTR) -1 )
 
+typedef NTSTATUS(__stdcall* STDCALL)(PLDR_DATA_TABLE_ENTRY);
+typedef NTSTATUS(__thiscall* THISCALL)(PLDR_DATA_TABLE_ENTRY);
+
+typedef struct _FP {
+    union {
+        STDCALL  stdcall;
+        THISCALL thiscall;
+        PVOID    ptr;
+    };
+} FP, *PFP;
+
 typedef struct _IMAGE_RELOC {
     WORD offset :12;
     WORD type   :4;
@@ -42,6 +53,19 @@ BOOL IsHeapPtr(
 
 BOOL IsReadable(
     IN LPVOID ptr);
+
+VOID unload_dependency(
+    IN PLOADED_PE_INFO peinfo);
+
+PVOID handle_dependency(
+    IN PLOADED_PE_INFO peinfo,
+    IN LPSTR dll_name);
+
+PVOID handle_import(
+    IN PLOADED_PE_INFO peinfo,
+    IN PVOID dll_base,
+    IN LPSTR dll_name,
+    IN LPSTR api_name);
 
 BOOL load_pe(
     IN PVOID pedata,

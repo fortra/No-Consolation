@@ -8,6 +8,24 @@
 
 #define STATUS_INVALID_BUFFER_SIZE 0xC0000206
 
+PVOID find_ldrp_handle_tls_data(VOID);
+
+PVOID find_ldrp_release_tls_entry(VOID);
+
+VOID insert_tail_list(
+    PLIST_ENTRY ListHead,
+    PLIST_ENTRY Entry);
+
+VOID unlink_from_list(
+    PLIST_ENTRY Entry);
+
+SIZE_T StringLengthA(
+    IN LPCSTR String);
+
+PCHAR StringConcatA(
+    IN PCHAR String,
+    IN PCHAR String2);
+
 VOID myRtlInitUnicodeString(
     OUT PUNICODE_STRING DestinationString,
     IN PCWSTR SourceString);

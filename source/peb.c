@@ -30,16 +30,14 @@ LPVOID find_reference(
     }
     if (addr == NULL)
     {
-        // we did not find the reference, use GetProcAddress
-        HMODULE hModule = xGetLibAddress(dll_name, TRUE, NULL);
-
+        // we did not find the reference, use LoadLibrary
+        DPRINT("Could not find %s, using LoadLibraryA", dll_name);
+        HMODULE hModule = LoadLibraryA(dll_name);
         if (hModule != NULL)
         {
-            DPRINT("Calling GetProcAddress(%s)", api_name);
+            DPRINT("Calling GetProcAddress(%s, %s)", dll_name, api_name);
             addr = GetProcAddress(hModule, api_name);
         }
-        else
-            addr = NULL;
     }
 
     return addr;
@@ -51,21 +49,23 @@ LPVOID xGetProcAddress(
     IN PCHAR api_name,
     IN DWORD ordinal)
 {
-    PIMAGE_DOS_HEADER       dos          = NULL;
-    PIMAGE_NT_HEADERS       nt           = NULL;
-    PIMAGE_DATA_DIRECTORY   dir          = NULL;
-    PIMAGE_EXPORT_DIRECTORY exp          = NULL;
-    LPVOID                  addr         = NULL;
-    DWORD                   rva          = 0;
-    DWORD                   cnt          = 0;
-    PDWORD                  adr          = NULL;
-    PDWORD                  sym          = NULL;
-    PWORD                   ord          = NULL;
-    PCHAR                   api          = NULL;
-    CHAR                    dll_name[64] = { 0 };
-    CHAR                    new_api[64]  = { 0 };
-    DWORD                   i            = 0;
-    PCHAR                   p            = NULL;
+    PIMAGE_DOS_HEADER       dos           = NULL;
+    PIMAGE_NT_HEADERS       nt            = NULL;
+    PIMAGE_DATA_DIRECTORY   dir           = NULL;
+    PIMAGE_EXPORT_DIRECTORY exp           = NULL;
+    LPVOID                  addr          = NULL;
+    DWORD                   rva           = 0;
+    DWORD                   cnt           = 0;
+    PDWORD                  adr           = NULL;
+    PDWORD                  sym           = NULL;
+    PWORD                   ord           = NULL;
+    PCHAR                   api           = NULL;
+    CHAR                    dll_name[256] = { 0 };
+    CHAR                    new_api[256]  = { 0 };
+    DWORD                   i             = 0;
+    PCHAR                   p             = NULL;
+    DWORD                   len           = 0;
+    PVOID                   newbase       = NULL;
 
     if (base == NULL) return NULL;
 
@@ -114,10 +114,15 @@ LPVOID xGetProcAddress(
 
         // copy DLL name to buffer
         p=(char*)addr;
+        len=StringLengthA(p);
 
         for (i=0; p[i] != 0 && i < sizeof(dll_name) - 4; i++)
         {
             dll_name[i] = p[i];
+        }
+
+        for (i=len-1; i > 0; i--)
+        {
             if(p[i] == '.') break;
         }
 
@@ -135,8 +140,27 @@ LPVOID xGetProcAddress(
         }
         new_api[i] = 0;
 
-        addr = find_reference(base, dll_name, new_api);
+        newbase = handle_dependency(NULL, dll_name);
+        if (base == newbase)
+        {
+            /*
+             * the api set seems to resolve to itself...
+             * lets just iterate over all loaded modules and
+             * find a module with the export we are looking for
+             */
+
+            addr = find_reference(base, dll_name, new_api);
+        }
+        else
+        {
+            /*
+             * we got a different DLL, call xGetProcAddress recursively
+             */
+
+            addr = xGetProcAddress(newbase, new_api, 0);
+        }
     }
+
     return addr;
 }
 
@@ -205,13 +229,14 @@ LPVOID xGetLibAddress(
     //DPRINT("Address of %s: %p", dll_name, addr);
 
     // if the DLL was not found, load it
-    if (addr == NULL && load)
+    if (!addr && load)
     {
         addr = LoadLibraryA(dll_name);
         DPRINT("Dll not found. Loaded %s via LoadLibrary at 0x%p", dll_name, addr);
-        if (loaded)
+        if (addr && loaded)
             *loaded = TRUE;
     }
+
     return addr;
 }
 
@@ -281,6 +306,12 @@ PRTL_RB_TREE find_module_base_address_index(VOID)
     SIZE_T                 stRet             = 0;
     DWORD                  dwLen             = 0;
     SIZE_T                 stBegin           = 0;
+    PMEMORY_STRUCTS        mem_structs       = NULL;
+
+    // check if we have saved the address of the module_base_address_index
+    mem_structs = BeaconGetValue(NC_MEM_STRUCTS_KEY);
+    if (mem_structs && mem_structs->module_base_address_index)
+        return mem_structs->module_base_address_index;
 
     ldr_entry = find_ldr_table_entry(L"ntdll.dll");
     if (!ldr_entry)
@@ -346,6 +377,12 @@ PRTL_RB_TREE find_module_base_address_index(VOID)
     if (!pModBaseAddrIndex)
     {
         DPRINT_ERR("Failed to find module base address index");
+    }
+    else
+    {
+        // save the address of the module_base_address_index;
+        if (mem_structs)
+            mem_structs->module_base_address_index = pModBaseAddrIndex;
     }
 
     return pModBaseAddrIndex;
@@ -431,6 +468,12 @@ PLIST_ENTRY find_hash_table(VOID)
     PLIST_ENTRY            pEntry        = NULL;
     PLDR_DATA_TABLE_ENTRY2 pCurrentEntry = NULL;
     ULONG                  ulHash        = 0;
+    PMEMORY_STRUCTS        mem_structs   = NULL;
+
+    // check if we have saved the address of the hash_table
+    mem_structs = BeaconGetValue(NC_MEM_STRUCTS_KEY);
+    if (mem_structs && mem_structs->hash_table)
+        return mem_structs->hash_table;
 
     peb = (PPEB2)READ_MEMLOC(PEB_OFFSET);
 
@@ -469,31 +512,17 @@ PLIST_ENTRY find_hash_table(VOID)
     {
         DPRINT_ERR("Failed to find hash table");
     }
+    else
+    {
+        // save the address of the hash_table
+        if (mem_structs)
+            mem_structs->hash_table = pList;
+    }
 
     return pList;
 }
 
 #endif
-
-VOID insert_tail_list(
-    PLIST_ENTRY ListHead,
-    PLIST_ENTRY Entry)
-{
-    PLIST_ENTRY Blink;
-
-    Blink = ListHead->Blink;
-    Entry->Flink = ListHead;
-    Entry->Blink = Blink;
-    Blink->Flink = Entry;
-    ListHead->Blink = Entry;
-}
-
-VOID unlink_from_list(
-    PLIST_ENTRY Entry)
-{
-    Entry->Flink->Blink = Entry->Blink;
-    Entry->Blink->Flink = Entry->Flink;
-}
 
 BOOL unlink_module(
     IN PLDR_DATA_TABLE_ENTRY2 ldr_entry)

@@ -1,6 +1,299 @@
 
 #include "loader.h"
 
+VOID unload_dependency(
+    IN PLOADED_PE_INFO peinfo)
+{
+    //DllMain_t DllMain = NULL;
+    NTSTATUS  status  = STATUS_UNSUCCESSFUL;
+    //FP        fp      = { 0 };
+
+    if (!peinfo || !peinfo->pe_base)
+        return;
+
+    if (!peinfo->dont_unload && peinfo->custom_loaded)
+    {
+        if (peinfo->is_dll && peinfo->DllMain)
+        {
+            /*
+             * Calling DllMain with DLL_PROCESS_DETACH seems to break future
+             * loads of mscoree.dll, so we avoid it
+             */
+
+            //DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_DETACH, NULL) for %s", peinfo->pe_name);
+            //DllMain = peinfo->DllMain;
+            //DllMain(peinfo->pe_base, DLL_PROCESS_DETACH, NULL);
+        }
+
+        /*
+        if (!peinfo->is_dependency && peinfo->handled_tls)
+        {
+            fp.ptr = find_ldrp_release_tls_entry();;
+            if (fp.ptr)
+                fp.thiscall(peinfo->ldr_entry);
+        }
+        /*/
+
+#ifdef _WIN64
+        if (peinfo->func_table)
+            remove_inverted_function_table_entry(peinfo->func_table);
+#endif
+
+        if (peinfo->linked)
+            unlink_module(peinfo->ldr_entry);
+
+        if (peinfo->ldr_entry)
+        {
+            memset(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->BaseDllName.Buffer, 0, sizeof(WCHAR) * MAX_PATH);
+            intFree(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->BaseDllName.Buffer);
+            memset(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->FullDllName.Buffer, 0, sizeof(WCHAR) * MAX_PATH);
+            intFree(((PLDR_DATA_TABLE_ENTRY2)peinfo->ldr_entry)->FullDllName.Buffer);
+            memset(peinfo->ldr_entry, 0, sizeof(PLDR_DATA_TABLE_ENTRY2));
+            intFree(peinfo->ldr_entry);
+        }
+
+        if (peinfo->pe_base)
+        {
+            peinfo->pe_size = 0;
+            status = NtFreeVirtualMemory(NtCurrentProcess(), &peinfo->pe_base, &peinfo->pe_size, MEM_RELEASE);
+            if (!NT_SUCCESS(status))
+            {
+                syscall_failed("NtFreeVirtualMemory", status);
+                PRINT_ERR("Failed to cleanup PE from memory");
+            }
+        }
+    }
+}
+
+BOOL find_dll(
+    IN PLOADED_PE_INFO dep,
+    IN LPSTR dll_name,
+    OUT PVOID* pe_bytes,
+    OUT int* pe_length)
+{
+    LPSTR search_paths      = dep->search_paths ? dep->search_paths : "C:\\Windows\\System32\\\0";
+    CHAR  pe_path[MAX_PATH] = { 0 };
+    DWORD i                 = 0;
+
+    for (;;)
+    {
+        // store string until null byte, semi-colon or comma encountered
+        for (i = 0; search_paths[i] != '\0' &&
+                    search_paths[i] != ';' &&
+                    search_paths[i] != ','; i++) pe_path[i] = search_paths[i];
+        // nothing stored? end
+        if (i == 0) break;
+        // skip name plus one for separator
+        search_paths += (i + 1);
+        // ensure the path ends with a backslash
+        if (pe_path[i-1] != '\\')
+        {
+            pe_path[i] = '\\';
+            i++;
+        }
+        // store null terminator
+        pe_path[i] = '\0';
+        // add the name of the DLL
+        StringConcatA(pe_path, dll_name);
+        // try to read the PE
+        if (read_local_pe(pe_path, pe_bytes, pe_length))
+        {
+            // set the PE path
+            CharStringToWCharString(dep->pe_wpath, pe_path, MAX_PATH);
+            return TRUE;
+        }
+    }
+
+    DPRINT_ERR("Failed to find %s", dll_name);
+
+    return FALSE;
+}
+
+BOOL load_dependency(
+    IN PLOADED_PE_INFO dep,
+    IN LPSTR dll_name)
+{
+    PVOID pe_bytes  = NULL;
+    int   pe_length = 0;
+
+    if (!find_dll(dep, dll_name, &pe_bytes, &pe_length))
+        return FALSE;
+
+    return load_pe(pe_bytes, pe_length, dep);
+}
+
+PVOID handle_dependency(
+    IN PLOADED_PE_INFO peinfo,
+    IN LPSTR dll_name)
+{
+    LPSTR           name        = NULL;
+    BOOL            api_set_ok  = FALSE;
+    PVOID           dll         = NULL;
+    PLOADED_PE_INFO dep         = NULL;
+    PLIB_LOADED     lib_loaded  = NULL;
+    PLIBS_LOADED    libs_loaded = NULL;
+
+    // resolve the API Set
+    name = api_set_resolve(dll_name);
+    api_set_ok = name != NULL;
+    if (!api_set_ok)
+        name = dll_name;
+
+    // if the name is empty, just return (this happens with ext-ms-win32-subsystem-query-l1-1-0.dll)
+    if (name[0] == '\0') return NULL;
+
+    // check if the DLL is already loaded
+    dll = xGetLibAddress(name, FALSE, NULL);
+
+    if (!dll)
+    {
+        /*
+         * Here we handle a peculiar edge case:
+         * 1) we are loading mprext.dll and realize it requires MPR.dll
+         * 2) we start loading MPR.dll and realize it requires mprext.dll
+         * 3) we then find the incomplete load of mprext.dll in memory and parse it
+         *    in order to find the addresses of its exported functions
+         * 4) we finish loading MPR.dll
+         * 5) we finish loading mprext.dll
+         */
+
+        libs_loaded = BeaconGetValue(NC_LOADED_DLL_KEY);
+
+        lib_loaded = (PLIB_LOADED)libs_loaded->list.Flink;
+        while (&lib_loaded->list != &libs_loaded->list)
+        {
+            if (!_stricmp(lib_loaded->peinfo->pe_name, name))
+            {
+                // found it
+                if (!lib_loaded->peinfo->pe_base && !lib_loaded->peinfo->custom_loaded)
+                {
+                    /*
+                     * We loaded this DLL via LoadLibrary before and it returned 0x0.
+                     * Simply return 0x0 as this DLL does not seem to exist
+                     */
+
+                    return NULL;
+                }
+
+                // return its base
+                dll = lib_loaded->peinfo->pe_base;
+                break;
+            }
+
+            lib_loaded = (PLIB_LOADED)lib_loaded->list.Flink;
+        }
+    }
+
+    if (!dll && peinfo)
+    {
+        dep = intAlloc(sizeof(LOADED_PE_INFO));
+        StringCopyA(dep->pe_name, name);
+        CharStringToWCharString(dep->pe_wname, name, MAX_PATH);
+        dep->link_to_peb   = peinfo->link_to_peb;
+        dep->dont_unload   = peinfo->dont_unload;
+        dep->is_dependency = TRUE;
+        dep->load_all_deps = peinfo->load_all_deps;
+        dep->load_all_deps_but = peinfo->load_all_deps_but;
+        dep->load_deps     = peinfo->load_deps;
+        dep->search_paths  = peinfo->search_paths;
+
+        store_loaded_dll(dep, dll, name);
+    }
+
+    // if not already loaded, custom load it if the operator so chooses
+    if (!dll && peinfo &&
+        (peinfo->load_all_deps ||
+        (peinfo->load_all_deps_but && !string_is_included(peinfo->load_all_deps_but, name)) ||
+        (peinfo->load_deps && string_is_included(peinfo->load_deps, name))))
+    {
+
+        DPRINT("%s depends on %s, custom loading...", peinfo->pe_name, name);
+        if (load_dependency(dep, name))
+        {
+            DPRINT("Finished loading %s, continuing with %s", name, peinfo->pe_name);
+            dep->custom_loaded = TRUE;
+            dll = dep->pe_base;
+        }
+        else
+        {
+            PRINT_ERR("Failed to custom load %s", name);
+        }
+    }
+
+    // fallback to LoadLibrary
+    if (!dll)
+    {
+        dll = LoadLibraryA(name);
+        if (peinfo)
+        {
+            DPRINT("Loaded %s via LoadLibrary at 0x%p, continuing with %s", name, dll, peinfo->pe_name);
+        }
+        else
+        {
+            DPRINT("Loaded %s via LoadLibrary at 0x%p", name, dll);
+        }
+        if (dep)
+        {
+            dep->custom_loaded = FALSE;
+            dep->pe_base       = dll;
+        }
+    }
+
+    if (api_set_ok)
+    {
+        memset(name, 0, MAX_PATH);
+        intFree(name);
+    }
+
+    return dll;
+}
+
+PVOID handle_import(
+    IN PLOADED_PE_INFO peinfo,
+    IN PVOID dll_base,
+    IN LPSTR dll_name,
+    IN LPSTR api_name)
+{
+    PVOID address = NULL;
+
+    /*
+     * Here we implement our IAT hooking.
+     * If the PE was run with --dont-unload, we don't redirect imports
+     * to this BOF, as this will be offloaded soon.
+     */
+
+    // if this is an exit-related API, replace it with RtlExitUserThread
+    if (IsExitAPI(api_name))
+    {
+        DPRINT("IAT hooking %s!%s with ntdll!RtlExitUserThread", dll_name ? dll_name : "?", api_name);
+        address = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
+    }
+    // some PEs search for exit-related APIs using GetProcAddress
+    else if (peinfo && !peinfo->dont_unload && !peinfo->is_dependency && !_stricmp(api_name, "GetProcAddress"))
+    {
+        DPRINT("IAT hooking %s!%s with my_get_proc_address", dll_name ? dll_name : "?", api_name);
+        address = my_get_proc_address;
+    }
+    // PEs call GetModuleHandleW(NULL), we ensure this returns their base address
+    else if (peinfo && !peinfo->dont_unload && !peinfo->is_dependency && !_stricmp(api_name, "GetModuleHandleW"))
+    {
+        DPRINT("IAT hooking %s!%s with my_get_module_handle_w", dll_name ? dll_name : "?", api_name);
+        address = my_get_module_handle_w;
+    }
+    // resolve the API without IAT hook
+    else
+    {
+        address = xGetProcAddress(dll_base, api_name, 0);
+    }
+
+    if (!address)
+    {
+        DPRINT_ERR("Failed get address of %s!%s", dll_name ? dll_name : "?", api_name);
+    }
+
+    return address;
+}
+
 BOOL load_pe(
     IN PVOID pedata,
     IN UINT32 pelen,
@@ -31,7 +324,6 @@ BOOL load_pe(
     PBYTE                       ofs         = NULL;
     PCHAR                       str         = NULL;
     PCHAR                       name        = NULL;
-    BOOL                        api_set_ok  = FALSE;
     HMODULE                     dll         = NULL;
     LPVOID                      base        = NULL;
     DWORD                       i           = 0;
@@ -44,8 +336,8 @@ BOOL load_pe(
     PVOID                       pe_base     = NULL;
     SIZE_T                      pe_size     = 0;
     BOOL                        has_reloc   = FALSE;
-    BOOL                        loaded      = FALSE;
     DllMain_t                   DllMain     = NULL;
+    FP                          fp          = { 0 };
 
     if (!is_pe(pedata))
     {
@@ -107,6 +399,9 @@ BOOL load_pe(
 
         DPRINT("Copied %s at 0x%p", sh[i].Name, dest);
     }
+
+    peinfo->pe_base = pe_base;
+    peinfo->pe_size = pe_size;
 
     ofs  = (PBYTE)pe_base - nt->OptionalHeader.ImageBase;
 
@@ -187,25 +482,14 @@ BOOL load_pe(
         for (; imp->Name != 0; imp++)
         {
             name = RVA2VA(PCHAR, pe_base, imp->Name);
-            name = api_set_resolve(name);
-            api_set_ok = name != NULL;
-            if (!api_set_ok)
-            {
-                name = RVA2VA(PCHAR, pe_base, imp->Name);
-            }
 
-            dll = xGetLibAddress(name, TRUE, &loaded);
-
+            dll = handle_dependency(peinfo, name);
             if (!dll)
             {
                 DPRINT_ERR("Failed to load %s", name);
-                if (api_set_ok)
-                    intFree(name);
                 goto Cleanup;
             }
 
-            // remember we loaded this DLL
-            store_loaded_dll(peinfo, dll, name);
             // remember if msvcrt gets loaded
             if (!_stricmp(name, "msvcrt.dll"))
                 peinfo->loaded_msvcrt   = TRUE;
@@ -233,8 +517,6 @@ BOOL load_pe(
                     if (!ft->u1.Function)
                     {
                         DPRINT_ERR("Failed get address of ordinal %d from %s", oft->u1.Ordinal, name);
-                        if (api_set_ok)
-                            intFree(name);
                         goto Cleanup;
                     }
                 }
@@ -242,44 +524,11 @@ BOOL load_pe(
                 {
                     // Resolve by name
                     ibn = RVA2VA(PIMAGE_IMPORT_BY_NAME, pe_base, oft->u1.AddressOfData);
-
-                    // if this is an exit-related API, replace it with RtlExitUserThread
-                    if (IsExitAPI(ibn->Name))
-                    {
-                        DPRINT("IAT hooking %s!%s with ntdll!RtlExitUserThread", name, ibn->Name);
-                        ft->u1.Function = (ULONG_PTR)xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
-                    }
-                    // some PEs search for exit-related APIs using GetProcAddress
-                    else if (!peinfo->dont_unload && !_stricmp(ibn->Name, "GetProcAddress"))
-                    {
-                        DPRINT("IAT hooking %s!%s with my_get_proc_address", name, ibn->Name);
-                        ft->u1.Function = (ULONG_PTR)my_get_proc_address;
-                    }
-                    // PEs call GetModuleHandleW(NULL), we ensure this returns their base address
-                    else if (!peinfo->dont_unload && !_stricmp(ibn->Name, "GetModuleHandleW"))
-                    {
-                        DPRINT("IAT hooking %s!%s with my_get_module_handle_w", name, ibn->Name);
-                        ft->u1.Function = (ULONG_PTR)my_get_module_handle_w;
-                    }
-                    // resolve the API without IAT hook
-                    else
-                    {
-                        ft->u1.Function = (ULONG_PTR)xGetProcAddress(dll, ibn->Name, 0);
-                    }
+                    ft->u1.Function = (ULONG_PTR)handle_import(peinfo, dll, name, ibn->Name);
 
                     if (!ft->u1.Function)
-                    {
-                        DPRINT_ERR("Failed get address of %s!%s", name, ibn->Name);
-                        if (api_set_ok)
-                            intFree(name);
                         goto Cleanup;
-                    }
                 }
-            }
-
-            if (api_set_ok)
-            {
-                intFree(name); name = NULL;
             }
         }
     }
@@ -296,22 +545,9 @@ BOOL load_pe(
         for (; del->DllNameRVA != 0; del++)
         {
             name = RVA2VA(PCHAR, pe_base, del->DllNameRVA);
-            name = api_set_resolve(name);
-            api_set_ok = name != NULL;
-            if (!api_set_ok)
-            {
-                name = RVA2VA(PCHAR, pe_base, del->DllNameRVA);
-            }
 
-            // if the name is empty, just continue
-            if (name[0] == '\0') continue;
-
-            dll = xGetLibAddress(name, TRUE, &loaded);
-
+            dll = handle_dependency(peinfo, name);
             if (dll == NULL) continue;
-
-            // remember we loaded this DLL
-            store_loaded_dll(peinfo, dll, name);
 
             // Resolve the API for this library
             oft = RVA2VA(PIMAGE_THUNK_DATA, pe_base, del->ImportNameTableRVA);
@@ -332,13 +568,8 @@ BOOL load_pe(
                 {
                     // Resolve by name
                     ibn = RVA2VA(PIMAGE_IMPORT_BY_NAME, pe_base, oft->u1.AddressOfData);
-                    ft->u1.Function = (ULONG_PTR)xGetProcAddress(dll, ibn->Name, 0);
+                    ft->u1.Function = (ULONG_PTR)handle_import(peinfo, dll, name, ibn->Name);
                 }
-            }
-
-            if (api_set_ok)
-            {
-                intFree(name); name = NULL;
             }
         }
     }
@@ -410,34 +641,6 @@ BOOL load_pe(
         goto Cleanup;
     }
 
-    // Execute TLS callbacks
-    rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress;
-    if (rva != 0)
-    {
-        DPRINT("Processing TLS directory");
-
-        tls = RVA2VA(PIMAGE_TLS_DIRECTORY, pe_base, rva);
-
-        // address of callbacks is absolute. requires relocation information
-        callbacks = (PIMAGE_TLS_CALLBACK*)tls->AddressOfCallBacks;
-        DPRINT("AddressOfCallBacks : %p", callbacks);
-
-        if (callbacks)
-        {
-            while (*callbacks != NULL)
-            {
-                /*
-                 * while TLS callbacks are called by this thread (meaning, no hwbp)
-                 * this in unlikely to be an issue given that they are
-                 * usually created by the compiler and should be harmless
-                 */
-                DPRINT("Calling %p", *callbacks);
-                (*callbacks)((LPVOID)pe_base, DLL_PROCESS_ATTACH, NULL);
-                callbacks++;
-            }
-        }
-    }
-
     // find the entry point of the PE
     if (peinfo->is_dll)
     {
@@ -481,24 +684,10 @@ BOOL load_pe(
                 }
             }
         }
-
-        // call DllMain if apropiate
-        if ((peinfo->is_dependency || peinfo->method) && peinfo->DllMain)
-        {
-            DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
-
-            DllMain = peinfo->DllMain;
-            DllMain(peinfo->pe_base, DLL_PROCESS_ATTACH, NULL);
-        }
     }
     else
     {
         peinfo->EntryPoint = RVA2VA(PVOID, pe_base, nt->OptionalHeader.AddressOfEntryPoint);
-    }
-
-    if (!peinfo->is_dependency && !SetCommandLineW(peinfo->cmdwline))
-    {
-        goto Cleanup;
     }
 
     if (peinfo->link_to_peb)
@@ -513,40 +702,73 @@ BOOL load_pe(
         peinfo->linked = TRUE;
     }
 
-    peinfo->pe_base = pe_base;
-    peinfo->pe_size = pe_size;
+    if (peinfo->ldr_entry)
+    {
+        DPRINT("Processing Thread Local Storage");
+
+        fp.ptr = find_ldrp_handle_tls_data();;
+        if (fp.ptr)
+        {
+            status = fp.thiscall(peinfo->ldr_entry);
+            if (!NT_SUCCESS(status))
+            {
+                syscall_failed("LdrpHandleTlsData", status);
+                goto Cleanup;
+            }
+
+            peinfo->handled_tls = TRUE;
+        }
+    }
+
+    // Execute TLS callbacks
+    rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress;
+    if (rva != 0)
+    {
+        DPRINT("Processing TLS directory");
+
+        tls = RVA2VA(PIMAGE_TLS_DIRECTORY, pe_base, rva);
+
+        // address of callbacks is absolute. requires relocation information
+        callbacks = (PIMAGE_TLS_CALLBACK*)tls->AddressOfCallBacks;
+        DPRINT("AddressOfCallBacks : %p", callbacks);
+
+        if (callbacks)
+        {
+            while (*callbacks != NULL)
+            {
+                /*
+                 * while TLS callbacks are called by this thread (meaning, no hwbp)
+                 * this in unlikely to be an issue given that they are
+                 * usually created by the compiler and should be harmless
+                 */
+                DPRINT("Calling %p", *callbacks);
+                (*callbacks)((LPVOID)pe_base, DLL_PROCESS_ATTACH, NULL);
+                callbacks++;
+            }
+        }
+    }
+
+    // call DllMain if apropiate
+    if (peinfo->is_dll && (peinfo->is_dependency || peinfo->method) && peinfo->DllMain)
+    {
+        DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
+
+        DllMain = peinfo->DllMain;
+        DllMain(peinfo->pe_base, DLL_PROCESS_ATTACH, NULL);
+    }
+
+    if (!peinfo->is_dependency && !SetCommandLineW(peinfo->cmdwline))
+    {
+        goto Cleanup;
+    }
+
+    peinfo->loaded = TRUE;
 
     return TRUE;
 
 Cleanup:
-    if (pe_base)
-    {
-#ifdef _WIN64
-        if (peinfo->func_table)
-        {
-            remove_inverted_function_table_entry(peinfo->func_table);
-            peinfo->func_table = NULL;
-        }
-#endif
 
-        if (peinfo->linked)
-        {
-            unlink_module(peinfo->ldr_entry);
-            peinfo->linked = FALSE;
-        }
-
-        peinfo->pe_base = pe_base;
-        peinfo->pe_size = 0;
-        status = NtFreeVirtualMemory(NtCurrentProcess(), &peinfo->pe_base, &peinfo->pe_size, MEM_RELEASE);
-        if (!NT_SUCCESS(status))
-        {
-            syscall_failed("NtFreeVirtualMemory", status);
-            PRINT_ERR("Failed to cleanup PE from memory");
-        }
-    }
-
-    peinfo->pe_base = NULL;
-
+    // TODO: cleanup?
     return FALSE;
 }
 

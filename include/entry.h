@@ -2,7 +2,21 @@
 
 #include <windows.h>
 
+#define NC_HANDLE_INFO_KEY "NoConsolationHandleKey"
+#define NC_SAVED_PE_KEY    "NoConsolationSavedPeKey"
+#define NC_PE_INFO_KEY     "NoConsolationPeInfoKey"
+#define NC_LOADED_DLL_KEY  "NoConsolationLoadedDllKey"
+#define NC_MEM_STRUCTS_KEY "NoConsolationMeStructsKey"
+
 #define MIN_XOR_KEY_LENGTH 16
+
+typedef struct _MEMORY_STRUCTS {
+    PVOID module_base_address_index;
+    PVOID hash_table;
+    PVOID ldrp_handle_tls_data;
+    PVOID ldrp_release_tls_entry;
+    PVOID console_connection_state;
+} MEMORY_STRUCTS, * PMEMORY_STRUCTS;
 
 typedef struct _SAVED_PE {
     CHAR    pe_name[MAX_PATH];
@@ -23,17 +37,13 @@ typedef struct _HANDLE_INFO {
     int fo_ucrtbase;
 } HANDLE_INFO, * PHANDLE_INFO;
 
-typedef struct _LIB_LOADED {
-    CHAR  name[MAX_PATH];
-    PVOID address;
-    struct _LIB_LOADED* next;
-} LIB_LOADED, * PLIB_LOADED;
-
 typedef struct _LOADED_PE_INFO {
+    CHAR         pe_name[MAX_PATH];
     WCHAR        pe_wname[MAX_PATH];
     WCHAR        pe_wpath[MAX_PATH];
     PVOID        pe_base;
     SIZE_T       pe_size;
+    BOOL         loaded;
     LPWSTR       cmdwline;
     LPCSTR       cmdline;
     UINT32       timeout;
@@ -43,7 +53,14 @@ typedef struct _LOADED_PE_INFO {
     BOOL         nooutput;
     BOOL         alloc_console;
     BOOL         unload_libs;
-    PLIB_LOADED  libs_loaded;
+    BOOL         load_all_deps;
+    LPSTR        load_all_deps_but;
+    LPSTR        load_deps;
+    LPSTR        search_paths;
+    BOOL         custom_loaded;
+    BOOL         load_in_progress;
+    BOOL         handled_tls;
+    //PLIB_LOADED  libs_loaded;
     PVOID        EntryPoint;
     PVOID        DllMain;
     PVOID        DllParam;
@@ -85,3 +102,13 @@ typedef struct _LOADED_PE_INFO {
     BOOL         dont_unload;
 } LOADED_PE_INFO, * PLOADED_PE_INFO;
 
+typedef struct _LIBS_LOADED {
+    LIST_ENTRY list;
+} LIBS_LOADED, * PLIBS_LOADED;
+
+typedef struct _LIB_LOADED {
+    LIST_ENTRY list;
+    CHAR  name[MAX_PATH];
+    PVOID address;
+    PLOADED_PE_INFO peinfo;
+} LIB_LOADED, * PLIB_LOADED;

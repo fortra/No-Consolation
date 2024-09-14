@@ -528,20 +528,12 @@ BOOL unlink_module(
     IN PLDR_DATA_TABLE_ENTRY2 ldr_entry)
 {
 #ifdef _WIN64
-    PLIST_ENTRY LdrpHashTable = NULL;
-    ULONG       ulHash        = 0;
-
-    LdrpHashTable = find_hash_table();
-    if (!LdrpHashTable)
-        return FALSE;
-
     // remove from the base address entry
     if (!update_base_address_entry(ldr_entry, FALSE))
         return FALSE;
 
     // remove from the ldr hash table
-    ulHash = ldr_hash_entry(ldr_entry->BaseDllName, TRUE);
-    unlink_from_list(&LdrpHashTable[ulHash]);
+    unlink_from_list(&ldr_entry->HashLinks);
 #endif
 
     // remove from standard lists

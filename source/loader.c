@@ -265,8 +265,8 @@ PVOID handle_import(
     // if this is an exit-related API, replace it with RtlExitUserThread
     if (IsExitAPI(api_name))
     {
-        DPRINT("IAT hooking %s!%s with ntdll!RtlExitUserThread", dll_name ? dll_name : "?", api_name);
-        address = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
+        DPRINT("IAT hooking %s!%s with rtl_exit_user_thread", dll_name ? dll_name : "?", api_name);
+        address = rtl_exit_user_thread;
     }
     // some PEs search for exit-related APIs using GetProcAddress
     else if (peinfo && !peinfo->dont_unload && !peinfo->is_dependency && !_stricmp(api_name, "GetProcAddress"))

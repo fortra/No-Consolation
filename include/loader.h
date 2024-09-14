@@ -17,6 +17,7 @@
 #endif
 
 #define NtCurrentProcess() ( (HANDLE)(LONG_PTR) -1 )
+#define NtCurrentThread() ( (HANDLE)(LONG_PTR) -2 )
 
 typedef NTSTATUS(__stdcall* STDCALL)(PLDR_DATA_TABLE_ENTRY);
 typedef NTSTATUS(__thiscall* THISCALL)(PLDR_DATA_TABLE_ENTRY);
@@ -35,6 +36,7 @@ typedef struct _IMAGE_RELOC {
 } IMAGE_RELOC, *PIMAGE_RELOC;
 
 typedef BOOL  (WINAPI *DllMain_t)(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved);
+typedef BOOL  (WINAPI *Entry_t)(PVOID Param1, PVOID Param2, PVOID Param3);
 
 // for setting the command line...
 typedef CHAR**  (WINAPI *p_acmdln_t)(VOID);

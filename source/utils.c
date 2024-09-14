@@ -739,6 +739,58 @@ HANDLE get_std_in_handle(VOID)
     return ProcessParameters->StandardInput;
 }
 
+DWORD get_tid(VOID)
+{
+    return (DWORD)(ULONG_PTR)((PTEB2)NtCurrentTeb())->ClientId.UniqueThread;
+}
+
+VOID rtl_exit_user_thread(VOID)
+{
+    PEXEC_CTX exec_ctx = BeaconGetValue(NC_EXEC_CTX);
+
+    // do we have a execution context saved?
+    if (exec_ctx)
+    {
+        // ensure this is the main thread
+        if (exec_ctx->Tid == get_tid())
+        {
+            // PE has exited, restore the execution context
+#ifdef _WIN64
+            __asm__(
+                "mov rsp, rax \n"
+                "mov rbp, rdx \n"
+                "jmp rcx \n"
+                : // no outputs
+                : "r" (exec_ctx->Rsp), // RAX IN
+                  "r" (exec_ctx->Rbp), // RDX IN
+                  "r" (exec_ctx->Rip)  // RCX IN
+            );
+#else
+            __asm__(
+                "mov esp, eax \n"
+                "mov ebp, edx \n"
+                "jmp ecx \n"
+                : // no outputs
+                : "r" (exec_ctx->Rsp), // EAX IN
+                  "r" (exec_ctx->Rbp), // EDX IN
+                  "r" (exec_ctx->Rip)  // ECX IN
+            );
+#endif
+        }
+    }
+
+    // either there is no execution context saved or this is not the main thread, simply exit
+    VOID ( WINAPI *RtlExitUserThread ) ( NTSTATUS ) = xGetProcAddress(xGetLibAddress("ntdll", TRUE, NULL), "RtlExitUserThread", 0);
+    if (RtlExitUserThread)
+    {
+        return RtlExitUserThread(0);
+    }
+    else
+    {
+        api_not_found("RtlExitUserThread");
+    }
+}
+
 BOOL create_thread(
     OUT PHANDLE hThread)
 {

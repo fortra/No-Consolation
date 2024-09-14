@@ -1,6 +1,117 @@
 
 #include "runner.h"
 
+BOOL exec_entrypoint_inthread(
+    IN PVOID EntryPoint,
+    IN PVOID Param1,
+    IN PVOID Param2,
+    IN PVOID Param3)
+{
+    Entry_t   Entry    = EntryPoint;
+    PVOID     Rsp      = NULL;
+    PVOID     Rbp      = NULL;
+    PEXEC_CTX exec_ctx = NULL;
+
+    // get RSP and RBP
+#ifdef _WIN64
+    __asm__(
+        "mov rax, rsp \n"
+        "mov rdx, rbp \n"
+        : "=r" (Rbp), // RDX OUT
+          "=r" (Rsp)  // RAX OUT
+        :
+    );
+#else
+    __asm__(
+        "mov eax, esp \n"
+        "mov edx, ebp \n"
+        : "=r" (Rbp), // EDX OUT
+          "=r" (Rbp)  // EAX OUT
+        :
+    );
+#endif
+
+    // save the execution context in the Key/Value store
+    exec_ctx = intAlloc(sizeof(EXEC_CTX));
+    exec_ctx->Rsp = Rsp;
+    exec_ctx->Rbp = Rbp;
+    exec_ctx->Rip = &&return_addr;
+    exec_ctx->Tid = get_tid();
+    BeaconAddValue(NC_EXEC_CTX, exec_ctx);
+
+    // jumping to the entry point... wish me luck!
+    Entry(Param1, Param2, Param3);
+
+return_addr:
+    DPRINT("Execution context restored"); // :^)
+
+    memset(exec_ctx, 0, sizeof(EXEC_CTX));
+    intFree(exec_ctx);
+    BeaconRemoveValue(NC_EXEC_CTX);
+
+    return TRUE;
+}
+
+BOOL run_pe_inthread(
+    IN PLOADED_PE_INFO peinfo)
+{
+    if (peinfo->is_dll)
+    {
+        if (peinfo->method)
+        {
+            DPRINT("Executing %ls!%s", peinfo->pe_wname, peinfo->method);
+
+            if (peinfo->cmdwline || peinfo->cmdline)
+            {
+                if (peinfo->use_unicode)
+                {
+                    if (!exec_entrypoint_inthread(peinfo->DllParam, (PVOID)peinfo->cmdwline, NULL, NULL))
+                    {
+                        return FALSE;
+                    }
+                }
+                else
+                {
+                    if (!exec_entrypoint_inthread(peinfo->DllParam, (PVOID)peinfo->cmdline, NULL, NULL))
+                    {
+                        return FALSE;
+                    }
+                }
+            }
+            else
+            {
+                if (!exec_entrypoint_inthread(peinfo->DllParam, NULL, NULL, NULL))
+                {
+                    return FALSE;
+                }
+            }
+        }
+        else
+        {
+            if (peinfo->DllMain)
+            {
+                DPRINT("Executing DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)");
+
+                if (!exec_entrypoint_inthread(peinfo->DllMain, peinfo->pe_base, (PVOID)DLL_PROCESS_ATTACH, NULL))
+                {
+                    return FALSE;
+                }
+            }
+        }
+    }
+    else
+    {
+        DPRINT("Executing %ls", peinfo->pe_wname);
+
+        if (!exec_entrypoint_inthread(peinfo->EntryPoint, NULL, NULL, NULL))
+        {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
 BOOL set_thread_context(
     IN HANDLE hThread,
     IN PVOID Rip,
@@ -146,7 +257,7 @@ BOOL resume_thread(
     return TRUE;
 }
 
-BOOL read_output(
+BOOL read_output_from_thread(
     IN PLOADED_PE_INFO peinfo,
     OUT PBOOL aborted)
 {
@@ -272,6 +383,53 @@ BOOL read_output(
     return TRUE;
 }
 
+BOOL read_output_inthread(
+    IN PLOADED_PE_INFO peinfo)
+{
+    DWORD output_length = 0;
+    PCHAR recv_buffer   = NULL;
+
+    if (peinfo->nooutput)
+        return TRUE;
+
+    recv_buffer = intAlloc(BUFFER_SIZE);
+    if (!recv_buffer)
+    {
+        malloc_failed();
+        return FALSE;
+    }
+
+    do {
+        // See if/how much data is available to be read from pipe
+        if (!PeekNamedPipe(peinfo->Handles->hRead, NULL, 0, NULL, &output_length, NULL))
+        {
+            function_failed("PeekNamedPipe");
+        }
+
+        // If there is data to be read, zero out buffer, read data, and send back to CS
+        if (output_length)
+        {
+            memset(recv_buffer, 0, BUFFER_SIZE);
+
+            if (ReadFile((PVOID)peinfo->Handles->hRead, recv_buffer, BUFFER_SIZE - 1, NULL, NULL))
+            {
+                // Send output back
+                PRINT("%s", recv_buffer);
+            }
+            else
+            {
+                function_failed("ReadFile");
+            }
+        }
+    } while (output_length);
+
+    // Free results buffer
+    memset(recv_buffer, 0, BUFFER_SIZE);
+    intFree(recv_buffer);
+
+    return TRUE;
+}
+
 BOOL run_pe(
     IN PLOADED_PE_INFO peinfo)
 {
@@ -288,19 +446,34 @@ BOOL run_pe(
         return TRUE;
     }
 
-    if (!prepare_thread(peinfo))
+    if (peinfo->inthread)
     {
-        return FALSE;
-    }
+        if (!run_pe_inthread(peinfo))
+        {
+            return FALSE;
+        }
 
-    if (!resume_thread(peinfo))
-    {
-        return FALSE;
+        if (!read_output_inthread(peinfo))
+        {
+            return FALSE;
+        }
     }
-
-    if (!read_output(peinfo, &aborted))
+    else
     {
-        return FALSE;
+        if (!prepare_thread(peinfo))
+        {
+            return FALSE;
+        }
+
+        if (!resume_thread(peinfo))
+        {
+            return FALSE;
+        }
+
+        if (!read_output_from_thread(peinfo, &aborted))
+        {
+            return FALSE;
+        }
     }
 
     if (peinfo->is_dll && peinfo->DllMain && !aborted && !peinfo->dont_unload)

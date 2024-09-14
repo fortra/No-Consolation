@@ -566,6 +566,47 @@ typedef struct _PEB2
     ULONG NtGlobalFlag2;
 } PEB2, *PPEB2;
 
+typedef struct _NT_TIB2
+{
+    struct _EXCEPTION_REGISTRATION_RECORD* ExceptionList;                   //0x0
+    VOID* StackBase;                                                        //0x8
+    VOID* StackLimit;                                                       //0x10
+    VOID* SubSystemTib;                                                     //0x18
+    union
+    {
+        VOID* FiberData;                                                    //0x20
+        ULONG Version;                                                      //0x20
+    };
+    VOID* ArbitraryUserPointer;                                             //0x28
+    struct _NT_TIB2* Self;                                                   //0x30
+} NT_TIB2,  *PNT_TIB2;
+
+typedef struct _TEB2
+{
+    struct _NT_TIB2 NtTib;                                                   //0x0
+    VOID* EnvironmentPointer;                                               //0x38
+    struct _CLIENT_ID ClientId;                                             //0x40
+    VOID* ActiveRpcHandle;                                                  //0x50
+    VOID* ThreadLocalStoragePointer;                                        //0x58
+    struct _PEB* ProcessEnvironmentBlock;                                   //0x60
+    ULONG LastErrorValue;                                                   //0x68
+    ULONG CountOfOwnedCriticalSections;                                     //0x6c
+    VOID* CsrClientThread;                                                  //0x70
+    VOID* Win32ThreadInfo;                                                  //0x78
+    ULONG User32Reserved[26];                                               //0x80
+    ULONG UserReserved[5];                                                  //0xe8
+    VOID* WOW32Reserved;                                                    //0x100
+    ULONG CurrentLocale;                                                    //0x108
+    ULONG FpSoftwareStatusRegister;                                         //0x10c
+    VOID* ReservedForDebuggerInstrumentation[16];                           //0x110
+    VOID* SystemReserved1[30];                                              //0x190
+    CHAR PlaceholderCompatibilityMode;                                      //0x280
+    UCHAR PlaceholderHydrationAlwaysExplicit;                               //0x281
+    CHAR PlaceholderReserved[10];                                           //0x282
+    ULONG ProxiedProcessId;                                                 //0x28c
+    // ...
+} TEB2, *PTEB2;
+
 typedef struct _INVERTED_FUNCTION_TABLE_ENTRY
 {
     PVOID FunctionTable;
@@ -614,6 +655,8 @@ WINBASEAPI NTSTATUS NTAPI   NTDLL$RtlUnicodeStringToAnsiString(PANSI_STRING Dest
 WINBASEAPI NTSTATUS NTAPI   NTDLL$NtQueryVirtualMemory(HANDLE ProcessHandle, PVOID BaseAddress, MEMORY_INFORMATION_CLASS MemoryInformationClass, PVOID MemoryInformation, SIZE_T MemoryInformationLength, PSIZE_T ReturnLength);
 WINBASEAPI NTSTATUS NTAPI   NTDLL$NtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList);
 WINBASEAPI SIZE_T NTSYSAPI  NTDLL$RtlCompareMemory(VOID *Source1, VOID *Source2, SIZE_T Length);
+WINBASEAPI NTSTATUS NTAPI   NTDLL$NtGetContextThread(HANDLE, PCONTEXT);
+WINBASEAPI NTSTATUS NTAPI   NTDLL$NtSetContextThread(HANDLE, PCONTEXT);
 
 WINBASEAPI WCHAR* __cdecl MSVCRT$wcscpy(WCHAR *strDestination,const WCHAR *strSource);
 WINBASEAPI  int   __cdecl MSVCRT$_stricmp(const char *string1,const char *string2);
@@ -649,6 +692,8 @@ WINBASEAPI BOOL   WINAPI KERNEL32$FreeLibrary(HANDLE hLibModule);
 #define NtQueryVirtualMemory         NTDLL$NtQueryVirtualMemory
 #define NtCreateThreadEx             NTDLL$NtCreateThreadEx
 #define RtlCompareMemory             NTDLL$RtlCompareMemory
+#define NtGetContextThread           NTDLL$NtGetContextThread
+#define NtSetContextThread           NTDLL$NtSetContextThread
 
 #define wcscpy                       MSVCRT$wcscpy
 #define _stricmp                     MSVCRT$_stricmp

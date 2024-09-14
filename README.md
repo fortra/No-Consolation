@@ -8,6 +8,7 @@ This is a Beacon Object File (BOF) that executes unmanaged PEs inline and retrie
 - Supports 64 and 32 bits
 - Supports EXEs and DLLs
 - Does not create new processes
+- Does not create new threads
 - Links modules to the PEB
 - Saves binaries in memory
 - Supports C++ exceptions (x64 only)
@@ -17,8 +18,9 @@ This is a Beacon Object File (BOF) that executes unmanaged PEs inline and retrie
 ```
 Summary: Run an unmanaged EXE/DLL inside Beacon's memory.
 
-Usage: noconsolation [--local] [--link-to-peb] [--dont-unload] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] [--load-all-dependencies] [--load-all-dependencies-but advapi32.dll] [--load-dependencies wininet.dll] [--search-paths C:\\Windows\\Temp\\] /path/to/binary.exe arg1 arg2
+Usage: noconsolation [--local] [--inthread] [--link-to-peb] [--dont-unload] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] [--load-all-dependencies] [--load-all-dependencies-but advapi32.dll] [--load-dependencies wininet.dll] [--search-paths C:\\Windows\\Temp\\] /path/to/binary.exe arg1 arg2
     --local, -l                                    Optional. The binary should be loaded from the target Windows machine
+    --inthread, -it                                Optional. Run the PE with the main thread. This might hang your beacon depending on the PE and its arguments.
     --link-to-peb, -ltp                            Optional. Load the PE into the PEB
     --dont-unload, -du                             Optional. If set, the DLL won't be unloaded.
     --timeout NUM_SECONDS, -t NUM_SECONDS          Optional. The number of seconds you wish to wait for the PE to complete running. Default 60 seconds. Set to 0 to disable

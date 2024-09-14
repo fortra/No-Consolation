@@ -46,6 +46,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     PLOADED_PE_INFO peinfo        = NULL;
     PLIBS_LOADED    libs_loaded   = NULL;
     PMEMORY_STRUCTS mem_structs   = NULL;
+    BOOL            inthread      = FALSE;
 
     BeaconDataParse(&parser, Buffer, Length);
     pe_wname      = (LPWSTR)BeaconDataExtract(&parser, NULL);
@@ -85,6 +86,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     load_deps     = load_deps[0] ? load_deps : NULL;
     search_paths  = BeaconDataExtract(&parser, NULL);
     search_paths  = search_paths[0] ? search_paths : NULL;
+    inthread      = BeaconDataInt(&parser);
 
     peinfo = intAlloc(sizeof(LOADED_PE_INFO));
 
@@ -108,6 +110,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->load_deps     = load_deps;
     peinfo->search_paths  = search_paths;
     peinfo->custom_loaded = TRUE;
+    peinfo->inthread      = inthread;
 
     // save a reference to peinfo
     BeaconAddValue(NC_PE_INFO_KEY, peinfo);
@@ -186,10 +189,17 @@ int go(IN PCHAR Buffer, IN ULONG Length)
         goto Cleanup;
     }
 
-    if (!create_thread(&peinfo->hThread))
+    if (peinfo->inthread)
     {
-        PRINT_ERR("failed to create thread");
-        goto Cleanup;
+        peinfo->hThread = NtCurrentThread();
+    }
+    else
+    {
+        if (!create_thread(&peinfo->hThread))
+        {
+            PRINT_ERR("failed to create thread");
+            goto Cleanup;
+        }
     }
 
     if (!redirect_std_out_err(peinfo))
@@ -213,6 +223,12 @@ Cleanup:
         memset(pe_bytes, 0, pe_length);
         intFree(pe_bytes);
     }
+
+    if (peinfo && peinfo->inthread && peinfo->hHwBp1)
+        unset_hwbp(peinfo->hThread, NT_DEVICE_IO_CONTROL_FILE_INDEX);
+
+    if (peinfo && peinfo->inthread && peinfo->hHwBp2)
+        unset_hwbp(peinfo->hThread, CREATE_FILE_INDEX);
 
     if (peinfo && peinfo->hHwBp1)
         remove_hwbp_handler(peinfo->hHwBp1);
@@ -294,7 +310,7 @@ Cleanup:
     if (peinfo && peinfo->modified_console_reference)
         *(PHANDLE)peinfo->console_reference_addr = peinfo->original_console_reference;
 
-    if (peinfo && peinfo->hThread)
+    if (peinfo && peinfo->hThread && !peinfo->inthread)
     {
         TerminateThread(peinfo->hThread, 0);
         NtClose(peinfo->hThread);

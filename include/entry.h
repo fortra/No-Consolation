@@ -6,7 +6,8 @@
 #define NC_SAVED_PE_KEY    "NoConsolationSavedPeKey"
 #define NC_PE_INFO_KEY     "NoConsolationPeInfoKey"
 #define NC_LOADED_DLL_KEY  "NoConsolationLoadedDllKey"
-#define NC_MEM_STRUCTS_KEY "NoConsolationMeStructsKey"
+#define NC_MEM_STRUCTS_KEY "NoConsolationMemStructsKey"
+#define NC_EXEC_CTX        "NoConsolationExecCtxKey"
 
 #define MIN_XOR_KEY_LENGTH 16
 
@@ -100,6 +101,7 @@ typedef struct _LOADED_PE_INFO {
     BOOL         linked;
     PVOID        ldr_entry;
     BOOL         dont_unload;
+    BOOL         inthread;
 } LOADED_PE_INFO, * PLOADED_PE_INFO;
 
 typedef struct _LIBS_LOADED {
@@ -112,3 +114,10 @@ typedef struct _LIB_LOADED {
     PVOID address;
     PLOADED_PE_INFO peinfo;
 } LIB_LOADED, * PLIB_LOADED;
+
+typedef struct _EXEC_CTX {
+    PVOID Rsp;
+    PVOID Rbp;
+    PVOID Rip;
+    DWORD Tid;
+} EXEC_CTX, * PEXEC_CTX;

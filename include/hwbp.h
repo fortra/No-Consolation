@@ -41,8 +41,8 @@ ULONG_PTR set_bits(
     ULONG_PTR newValue);
 
 VOID clear_breakpoint(
-    CONTEXT* ctx,
-    int index);
+    IN CONTEXT* ctx,
+    IN DWORD index);
 
 BOOL enable_breakpoint(
     OUT CONTEXT* ctx,

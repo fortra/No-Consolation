@@ -3,7 +3,7 @@ CC_x64 := x86_64-w64-mingw32-gcc
 CC_x86 := i686-w64-mingw32-gcc
 STRIP_x64 := x86_64-w64-mingw32-strip
 STRIP_x86 := i686-w64-mingw32-strip
-OPTIONS := -Wall -I include
+OPTIONS := -masm=intel -Wall -I include
 
 release:
 	$(CC_x64) -c source/entry.c -o dist/$(BOFNAME).x64.o $(OPTIONS)

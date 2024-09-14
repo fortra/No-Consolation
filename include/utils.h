@@ -121,6 +121,10 @@ VOID set_std_err_handle(
 
 HANDLE get_std_in_handle(VOID);
 
+DWORD get_tid(VOID);
+
+VOID rtl_exit_user_thread(VOID);
+
 BOOL create_thread(
     OUT PHANDLE hThread);
 

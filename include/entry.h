@@ -53,7 +53,6 @@ typedef struct _LOADED_PE_INFO {
     BOOL         use_unicode;
     BOOL         nooutput;
     BOOL         alloc_console;
-    BOOL         unload_libs;
     BOOL         load_all_deps;
     LPSTR        load_all_deps_but;
     LPSTR        load_deps;

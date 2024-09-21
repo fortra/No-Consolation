@@ -762,6 +762,11 @@ BOOL load_pe(
         goto Cleanup;
     }
 
+    if (peinfo->dont_unload)
+    {
+        store_loaded_dll(peinfo, peinfo->pe_base, peinfo->pe_name);
+    }
+
     peinfo->loaded = TRUE;
 
     return TRUE;

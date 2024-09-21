@@ -107,6 +107,15 @@ alias noconsolation
         else if (@_[$i] eq "--free-libraries" || @_[$i] eq "-fl")
         {
             $free_libs = 1;
+            $i++;
+
+            if($i >= size(@_))
+            {
+                berror($1, "missing --free-libraries value");
+                return;
+            }
+
+            $free_libs = @_[$i];
         }
         else if (@_[$i] eq "--dont-save" || @_[$i] eq "-ds")
         {
@@ -209,8 +218,8 @@ alias noconsolation
         }
     }
 
-    # allow users to close all handles without having to run a PE
-    if (strlen($unload_pe) == 0 && $list_pes == 0 && $name_set == 0 && $path_set == 0 && $close_handles == 0)
+    # allow users to perform some tasks without having to run a PE
+    if (strlen($free_libs) == 0 && strlen($unload_pe) == 0 && $list_pes == 0 && $name_set == 0 && $path_set == 0 && $close_handles == 0)
     {
         berror($1, "PE path not provided");
         return;
@@ -234,9 +243,27 @@ alias noconsolation
         return;
     }
 
+    if (strlen($free_libs) != 0 && $list_pes)
+    {
+        berror($bid, "The option --list-pes must be ran alone");
+        return;
+    }
+
+    if (strlen($free_libs) != 0 && strlen($unload_pe) != 0)
+    {
+        berror($bid, "The option --unload-pe must be ran alone");
+        return;
+    }
+
     if ($path_set && strlen($unload_pe) != 0)
     {
         berror($bid, "The option --unload-pe must be ran alone");
+        return;
+    }
+
+    if ($path_set && strlen($free_libs) != 0)
+    {
+        berror($bid, "The option --free-libraries must be ran alone");
         return;
     }
 
@@ -299,7 +326,7 @@ sub runpe{
     }
 
     # Pack the arguments
-    $args = bof_pack($1, "ZzZbziiiZzziiiiiiizzziiizzzi", $2 $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27);
+    $args = bof_pack($1, "ZzZbziiiZzziiiziiizzziiizzzi", $2 $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27);
 
     # Execute BOF
     beacon_inline_execute($1, $data, "go", $args);
@@ -311,7 +338,7 @@ beacon_command_register(
     "
 Summary: Run an unmanaged EXE/DLL inside Beacon's memory.
 
-Usage: noconsolation [--local] [--inthread] [--link-to-peb] [--dont-unload] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] [--load-all-dependencies] [--load-all-dependencies-but advapi32.dll] [--load-dependencies wininet.dll] [--search-paths C:\\Windows\\Temp\\] /path/to/binary.exe arg1 arg2
+Usage: noconsolation [--local] [--inthread] [--link-to-peb] [--dont-unload] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries wininet.dll,winhttp.dll] [--dont-save] [--list-pes] [--unload-pe pename] [--load-all-dependencies] [--load-all-dependencies-but advapi32.dll] [--load-dependencies wininet.dll] [--search-paths C:\\Windows\\Temp\\] /path/to/binary.exe arg1 arg2
     --local, -l                                    Optional. The binary should be loaded from the target Windows machine
     --inthread, -it                                Optional. Run the PE with the main thread. This might hang your beacon depending on the PE and its arguments.
     --link-to-peb, -ltp                            Optional. Load the PE into the PEB
@@ -323,7 +350,7 @@ Usage: noconsolation [--local] [--inthread] [--link-to-peb] [--dont-unload] [--t
     --no-output, -no                               Optional. Do not try to obtain the output
     --alloc-console, -ac                           Optional. Allocate a console. This will spawn a new process
     --close-handles, -ch                           Optional. Close Pipe handles once finished. If PowerShell was already ran, this will break the output for PowerShell in the future
-    --free-libraries, -fl                          Optional. Free all loaded DLLs
+    --free-libraries, -fl DLL_A,DLL_B              Optional. List of DLLs (previously loaded with --dont-unload) to be offloaded
     --dont-save, -ds                               Optional. Do not save this binary in memory
     --list-pes, -lpe                               Optional. List all PEs that have been loaded in memory
     --unload-pe PE_NAME, -upe PE_NAME              Optional. Unload from memory a PE

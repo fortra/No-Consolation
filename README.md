@@ -18,7 +18,7 @@ This is a Beacon Object File (BOF) that executes unmanaged PEs inline and retrie
 ```
 Summary: Run an unmanaged EXE/DLL inside Beacon's memory.
 
-Usage: noconsolation [--local] [--inthread] [--link-to-peb] [--dont-unload] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries] [--dont-save] [--list-pes] [--unload-pe pename] [--load-all-dependencies] [--load-all-dependencies-but advapi32.dll] [--load-dependencies wininet.dll] [--search-paths C:\\Windows\\Temp\\] /path/to/binary.exe arg1 arg2
+Usage: noconsolation [--local] [--inthread] [--link-to-peb] [--dont-unload] [--timeout 60] [-k] [--method funcname] [-w] [--no-output] [--alloc-console] [--close-handles] [--free-libraries wininet.dll,winhttp.dll] [--dont-save] [--list-pes] [--unload-pe pename] [--load-all-dependencies] [--load-all-dependencies-but advapi32.dll] [--load-dependencies wininet.dll] [--search-paths C:\Windows\Temp\] /path/to/binary.exe arg1 arg2
     --local, -l                                    Optional. The binary should be loaded from the target Windows machine
     --inthread, -it                                Optional. Run the PE with the main thread. This might hang your beacon depending on the PE and its arguments.
     --link-to-peb, -ltp                            Optional. Load the PE into the PEB
@@ -30,7 +30,7 @@ Usage: noconsolation [--local] [--inthread] [--link-to-peb] [--dont-unload] [--t
     --no-output, -no                               Optional. Do not try to obtain the output
     --alloc-console, -ac                           Optional. Allocate a console. This will spawn a new process
     --close-handles, -ch                           Optional. Close Pipe handles once finished. If PowerShell was already ran, this will break the output for PowerShell in the future
-    --free-libraries, -fl                          Optional. Free all loaded DLLs
+    --free-libraries, -fl DLL_A,DLL_B              Optional. List of DLLs (previously loaded with --dont-unload) to be offloaded
     --dont-save, -ds                               Optional. Do not save this binary in memory
     --list-pes, -lpe                               Optional. List all PEs that have been loaded in memory
     --unload-pe PE_NAME, -upe PE_NAME              Optional. Unload from memory a PE
@@ -42,9 +42,9 @@ Usage: noconsolation [--local] [--inthread] [--link-to-peb] [--dont-unload] [--t
     /path/to/binary.exe                   Required. Full path to the windows EXE/DLL you wish you run inside Beacon. If already loaded, you can simply specify the binary name.
     ARG1 ARG2                             Optional. Parameters for the PE. Must be provided after the path
 
-    Example: noconsolation --local C:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe \$ExecutionContext.SessionState.LanguageMode
+    Example: noconsolation --local C:\windows\system32\windowspowershell\v1.0\powershell.exe $ExecutionContext.SessionState.LanguageMode
     Example: noconsolation /tmp/mimikatz.exe privilege::debug token::elevate exit
-    Example: noconsolation --local C:\\windows\\system32\\cmd.exe /c ipconfig
+    Example: noconsolation --local C:\windows\system32\cmd.exe /c ipconfig
     Example: noconsolation --list-pes
     Example: noconsolation LoadedBinary.exe args
 ```

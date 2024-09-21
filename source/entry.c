@@ -28,7 +28,7 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     BOOL            nooutput      = FALSE;
     BOOL            alloc_console = FALSE;
     BOOL            close_handles = FALSE;
-    BOOL            unload_libs   = FALSE;
+    LPSTR           unload_libs   = NULL;
     BOOL            dont_save     = FALSE;
     BOOL            list_pes      = FALSE;
     LPSTR           unload_pe     = NULL;
@@ -68,7 +68,8 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     nooutput      = BeaconDataInt(&parser);
     alloc_console = BeaconDataInt(&parser);
     close_handles = BeaconDataInt(&parser);
-    unload_libs   = BeaconDataInt(&parser);
+    unload_libs   = BeaconDataExtract(&parser, NULL);
+    unload_libs   = unload_libs[0] ? unload_libs : NULL;
     dont_save     = BeaconDataInt(&parser);
     list_pes      = BeaconDataInt(&parser);
     unload_pe     = BeaconDataExtract(&parser, NULL);
@@ -101,7 +102,6 @@ int go(IN PCHAR Buffer, IN ULONG Length)
     peinfo->cmdline       = cmdline[0] ? cmdline : NULL;
     peinfo->nooutput      = nooutput;
     peinfo->alloc_console = alloc_console;
-    peinfo->unload_libs   = unload_libs;
     peinfo->link_to_peb   = link_to_peb;
     peinfo->dont_unload   = dont_unload;
     peinfo->is_dependency = FALSE;
@@ -336,29 +336,36 @@ Cleanup:
         lib_loaded = lib_tmp;
     }
 
-    if (peinfo && !peinfo->dont_unload)
-        unload_dependency(peinfo);
-
-    /*
-    if (peinfo && unload_libs)
+    if (unload_libs)
     {
-        //libs_entry = peinfo->libs_loaded;
-        libs_entry = BeaconGetValue(NC_LOADED_DLL_KEY);
-        while (libs_entry)
+        lib_loaded = (PLIB_LOADED)libs_loaded->list.Flink;
+        while (&lib_loaded->list != &libs_loaded->list)
         {
-            DPRINT("Freeing %s", libs_entry->name);
-            FreeLibrary(libs_entry->address);
+            lib_tmp = (PLIB_LOADED)lib_loaded->list.Flink;
 
-            libs_tmp = libs_entry->next;
-            memset(libs_entry, 0, sizeof(LIB_LOADED));
-            intFree(libs_entry);
-            libs_entry = libs_tmp;
+            DPRINT("unload_libs: %s, lib_loaded->name: %s", unload_libs, lib_loaded->name);
+            if (string_is_included(unload_libs, lib_loaded->name))
+            {
+                PRINT("unloaded %s", lib_loaded->name);
+                if (lib_loaded->peinfo->custom_loaded)
+                    unload_dependency(lib_loaded->peinfo);
+                else
+                    FreeLibrary(lib_loaded->address);
+
+                unlink_from_list(&lib_loaded->list);
+                memset(lib_loaded->peinfo, 0, sizeof(LOADED_PE_INFO));
+                intFree(lib_loaded->peinfo);
+                memset(lib_loaded, 0, sizeof(LIB_LOADED));
+                intFree(lib_loaded);
+            }
+
+            lib_loaded = lib_tmp;
         }
     }
-    */
 
-    if (peinfo)
+    if (peinfo && !peinfo->dont_unload)
     {
+        unload_dependency(peinfo);
         memset(peinfo, 0, sizeof(LOADED_PE_INFO));
         intFree(peinfo);
     }

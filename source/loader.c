@@ -367,7 +367,7 @@ BOOL load_pe(
     }
 
     pe_size = nt->OptionalHeader.SizeOfImage;
-    status = NtAllocateVirtualMemory(NtCurrentProcess(), &pe_base, 0, &pe_size, MEM_COMMIT, PAGE_READWRITE);
+    status = NtAllocateVirtualMemory(NtCurrentProcess(), &pe_base, 0, &pe_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!NT_SUCCESS(status))
     {
         pe_base = NULL;

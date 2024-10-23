@@ -21,7 +21,7 @@ alias noconsolation
     $nooutput = 0;
     $alloc_console = 0;
     $close_handles = 0;
-    $free_libs = 0;
+    $free_libs = '';
     $dont_save = 0;
     $list_pes = 0;
     $unload_pe = '';
@@ -106,7 +106,6 @@ alias noconsolation
         }
         else if (@_[$i] eq "--free-libraries" || @_[$i] eq "-fl")
         {
-            $free_libs = 1;
             $i++;
 
             if($i >= size(@_))
